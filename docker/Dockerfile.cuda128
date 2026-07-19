@@ -1,0 +1,59 @@
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04@sha256:24c8e3581ea6330038b0d374920721983312627f8adbfcf390bdb4b399d280ed AS builder
+
+ENV CUDA_HOME=/usr/local/cuda \
+    MAX_JOBS=4 \
+    PATH=/opt/venv/bin:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TORCH_CUDA_ARCH_LIST=12.0
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        git \
+        python3 \
+        python3-pip \
+        python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/venv
+
+WORKDIR /workspace
+
+COPY true_dna/requirements_rtx5080.txt true_dna/requirements_rtx5080-kernels.txt ./true_dna/
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install -r true_dna/requirements_rtx5080.txt \
+    && python -m pip install --no-build-isolation \
+        -r true_dna/requirements_rtx5080-kernels.txt
+
+COPY . .
+RUN python -m pip install --no-deps .
+
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04@sha256:ac55d124da4882b497f732d8dfd9a702d5447a5f29d08d56da6f64f0a1eb34bc
+
+LABEL org.opencontainers.image.title="True DNA CUDA 12.8 environment" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV CUDA_HOME=/usr/local/cuda \
+    PATH=/opt/venv/bin:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        ca-certificates \
+        libgomp1 \
+        python3-minimal \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 true-dna \
+    && useradd --uid 10001 --gid 10001 --create-home true-dna
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder --chown=true-dna:true-dna /workspace/true_dna /workspace/true_dna
+
+WORKDIR /workspace/true_dna
+USER true-dna
+
+CMD ["python", "scripts/train.py", "--help"]

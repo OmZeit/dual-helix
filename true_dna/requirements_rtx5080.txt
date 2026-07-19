@@ -1,0 +1,30 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Tested direct-dependency pins for the CUDA 12.8 RTX 5080 setup.
+# Use this file instead of requirements.txt.
+
+torch==2.11.0+cu128
+torchaudio==2.11.0+cu128
+torchvision==0.26.0+cu128
+numpy==2.4.4
+matplotlib==3.10.9
+scikit-learn==1.8.0
+scipy==1.17.1
+tqdm==4.67.3
+wandb==0.26.1
+accelerate==1.13.0
+tensorboard==2.20.0
+biopython==1.87
+rapidfuzz==3.14.5
+requests==2.34.2
+packaging==26.2
+ninja==1.13.0
+einops==0.8.2
+transformers==5.8.0
+triton==3.6.0; platform_system == "Linux"
+
+# Data and command-line tooling
+PyYAML==6.0.3
+psutil==7.2.2
+typer==0.25.1
+rich==15.0.0

@@ -1,0 +1,95 @@
+{
+  "genomic_benchmarks": [
+    "human_nontata_promoters",
+    "human_enhancers_cohn",
+    "human_enhancers_ensembl",
+    "human_ocr_ensembl",
+    "human_ensembl_regulatory",
+    "demo_coding_vs_intergenomic_seqs",
+    "demo_human_or_worm"
+  ],
+  "classification": [
+    {
+      "name": "splice_site_prediction",
+      "category": "short_range_motif",
+      "path": "benchmarks/splice_sites.csv",
+      "format": "csv",
+      "seq_col": "sequence",
+      "label_col": "label",
+      "split_col": "split"
+    },
+    {
+      "name": "tfbs_chipseq_peak",
+      "category": "short_range_motif",
+      "path": "benchmarks/tfbs_chipseq.tsv",
+      "format": "tsv",
+      "seq_col": "sequence",
+      "label_col": "bound",
+      "split_col": "split"
+    },
+    {
+      "name": "chromatin_accessibility_atac",
+      "category": "long_range_regulatory",
+      "path": "benchmarks/atac_accessibility.jsonl",
+      "format": "jsonl",
+      "seq_col": "sequence",
+      "label_col": "accessible",
+      "split_col": "split"
+    },
+    {
+      "name": "biotype_classification",
+      "category": "evolutionary_taxonomy",
+      "path": "benchmarks/biotype.csv",
+      "seq_col": "sequence",
+      "label_col": "biotype",
+      "split_col": "split"
+    },
+    {
+      "name": "taxonomy_classification",
+      "category": "evolutionary_taxonomy",
+      "format": "fasta",
+      "files": [
+        {
+          "path": "benchmarks/taxonomy/bacteria_train.fa",
+          "label": "bacteria",
+          "split": "train"
+        },
+        {
+          "path": "benchmarks/taxonomy/bacteria_test.fa",
+          "label": "bacteria",
+          "split": "test"
+        },
+        {
+          "path": "benchmarks/taxonomy/archaea_train.fa",
+          "label": "archaea",
+          "split": "train"
+        },
+        {
+          "path": "benchmarks/taxonomy/archaea_test.fa",
+          "label": "archaea",
+          "split": "test"
+        }
+      ]
+    }
+  ],
+  "regression": [
+    {
+      "name": "gene_expression_prediction",
+      "category": "long_range_expression",
+      "path": "benchmarks/gene_expression.csv",
+      "seq_col": "sequence",
+      "label_col": "expression",
+      "split_col": "split"
+    }
+  ],
+  "variant_effect": [
+    {
+      "name": "variant_effect_pathogenicity",
+      "category": "variant_effect",
+      "path": "benchmarks/variant_effect.csv",
+      "ref_col": "ref_seq",
+      "alt_col": "alt_seq",
+      "label_col": "label"
+    }
+  ]
+}

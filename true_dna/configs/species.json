@@ -1,0 +1,1967 @@
+[
+  {
+    "name": "Escherichia coli",
+    "domain": "bacteria",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Bacillus subtilis",
+    "domain": "bacteria",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Pseudomonas aeruginosa",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Staphylococcus aureus",
+    "domain": "bacteria",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Salmonella enterica",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Mycobacterium tuberculosis",
+    "domain": "bacteria",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Helicobacter pylori",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Streptococcus pneumoniae",
+    "domain": "bacteria",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Clostridioides difficile",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Vibrio cholerae",
+    "domain": "bacteria",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Neisseria gonorrhoeae",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Chlamydia trachomatis",
+    "domain": "bacteria",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Yersinia pestis",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Listeria monocytogenes",
+    "domain": "bacteria",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Caulobacter vibrioides",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Synechocystis sp. PCC 6803",
+    "domain": "bacteria",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Deinococcus radiodurans",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Rickettsia rickettsii",
+    "domain": "bacteria",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Borreliella burgdorferi",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Acinetobacter baumannii",
+    "domain": "bacteria",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Mycoplasmoides pneumoniae",
+    "domain": "bacteria",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Halobacterium salinarum R1",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula marismortui",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax volcanii DS2",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronomonas pharaonis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloquadratum walsbyi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum lacusprofundi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloterrigena turkmenica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halomicrobium mukohataei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrialba magadii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halalkalicoccus jeotgali",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halopiger xanaduensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula hispanica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorhabdus utahensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrinema pellirubrum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halostagnicola larsenii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothermobacter thermautotrophicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosphaera stadtmanae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter smithii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothermus fervidus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobacterium formicicum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter ruminantium",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobacterium kanagiense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocaldococcus jannaschii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocaldococcus villosus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanococcus maripaludis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanococcus aeolicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanococcus vannielii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothermococcus okinawensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanotorris igneus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosarcina acetivorans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosarcina barkeri",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosarcina mazei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanospirillum hungatei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoculleus marisnigri",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothrix thermoacetophila",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocorpusculum labreanum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolobus tindarius",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanococcoides burtonii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methermicoccus shengliensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanohalophilus mahii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus furiosus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus abyssi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus horikoshii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus kodakarensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus gammatolerans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus onnurineus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Palaeococcus ferrophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Archaeoglobus fulgidus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Archaeoglobus profundus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Archaeoglobus veneficus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ferroglobus placidus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Geoglobus ahangari",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermoplasma acidophilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermoplasma volcanium",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Picrophilus torridus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ferroplasma acidarmanus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Acidianus brierleyi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Saccharolobus solfataricus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Sulfolobus acidocaldarius",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Saccharolobus islandicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Metallosphaera sedula",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Acidianus sulfidivorans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Saccharolobus shibatae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Stygiolobus azoricus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Sulfurisphaera tokodaii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermoproteus tenax",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrobaculum neutrophilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrobaculum aerophilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrobaculum calidifontis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrobaculum islandicum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Vulcanisaeta distributa",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Caldivirga maquilingensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ignisphaera aggregans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Aeropyrum pernix",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Desulfurococcus kamchatkensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ignicoccus hospitalis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Staphylothermus marinus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Hyperthermus butylicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrodictium occultum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrolobus fumarii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nanoarchaeum equitans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosopumilus maritimus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrososphaera viennensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrososphaera gargensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Cenarchaeum symbiosum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Prometheoarchaeum syntrophicum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Acidianus manzaensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Aciduliprofundum boonei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Caldisphaera lagunensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Desulfurococcus fermentans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Fervidicoccus fontis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haladaptatus paucihalophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halobaculum gomorrense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax denitrificans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax gibbonsii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax mediterranei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halogeometricum borinquense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halococcus hamelinensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halococcus morrhuae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halococcus salifodinae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halomicrobium katesii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halonotius pteroides",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halopenitus persicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum coriense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum ezzemoulense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum inordinatum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum kocurii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum lipolyticum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum saccharovorum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum sodomense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorussus rarus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halosimplex carlsbadense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halostella salina",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloterrigena daqingensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halovenus aranensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halovivax ruber",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter curvatus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter filiformis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter gottschalkii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter oralis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocaldococcus fervens",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocaldococcus indicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocella arvoryzae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocella conradii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocella paludicola",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocorpusculum bavaricum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocorpusculum aggregans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoculleus bourgensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoculleus horonobensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanofollis liminatans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanogenium boonei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanogenium cariaci",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanogenium frigidum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanohalobium evestigatum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolacinia petrolearia",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolinea tarda",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanomassiliicoccus luminyensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoplanus petrolearius",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanopyrus kandleri",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoregula boonei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosalsum zhilinae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothrix soehngenii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrialba asiatica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrialba chahannaoensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrialba hulunbeirensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronococcus occultus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronorubrum bangense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrobaculum arsenaticum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrobaculum oguniense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Staphylothermus hellenicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Sulfuracidifex metallicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermogladius calderae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus barophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus celer",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus litoralis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus siculi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermosphaera aggregans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Vulcanisaeta moutnovskia",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Picrophilus oshimae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ferroplasma acidiphilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermodiscus maritimus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Stetteria hydrogenophila",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermocladium modestius",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermoproteus neutrophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Acidianus ambivalens",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Metallosphaera hakonensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Desulfurococcus amylolyticus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrodictium abyssi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermofilum adornatus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermofilum uzonense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Acidianus copahuensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosocaldus yellowstonii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrosocaldus cavascurensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosocosmicus franklandus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosocosmicus oleophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosocosmicus exaquare",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosocosmicus hydrocola",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosotenuis uzonensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosopumilus adriaticus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosopumilus salaria",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Nitrosopumilus sediminis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrosotalea devanaterra",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrosocosmicus nevadensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrosotenuis cloacae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Korarchaeum cryptofilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Caldiarchaeum subterraneum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Micrarchaeum harzensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Mancarchaeum acidiphilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Parvarchaeum acidiphilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Aenigmarchaeum subterraneum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Altiarchaeum hamiconexum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Lokiarchaeum ossiferum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nanopusillus acidilobi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter arboriphilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter boviskoreani",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter millerae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter olleyae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobacterium beijingense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobacterium palustre",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobacterium bryantii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosphaerula palustris",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoregula formicica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolinea mesophila",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanomethylophilus alvus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Methanoplasma termitum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanomassiliicoccus intestinalis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanogranum caenicola",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanomethylovorans hollandica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanomethylovorans thermophila",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolobus psychrophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolobus taylorii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosalsum natronophilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosaeta concilii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosarcina vacuolata",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosarcina horonobensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothermobacter wolfeii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanococcus voltae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocaldococcus infernus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus piezophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus guaymasensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus yayanosii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Palaeococcus pacificus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus thioreducens",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum trapanicum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum litoreum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum distributum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrinema versiforme",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrinema gari",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrinema altunense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halopelagius inordinatus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula vallismortis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula californiae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula amylolytica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula japonica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halobacterium noricense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax elongans",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax lucentense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax sulfurifontis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halogeometricum seosinense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haladaptatus litoreus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloplanus vescus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorubrum chaoviator",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorientalis maricola",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halolamina sediminis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halolamina pelagica",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloterrigena limicola",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrinema ejinorense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronolimnobius aegyptiacus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronolimnobius baerhuensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haladaptatus cibarius",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halarchaeum nitratireducens",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula argentinensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natrinema pallidum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronococcus amylolyticus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronococcus jeotgali",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronorubrum aibiense",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Natronorubrum sediminis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halovivax asiaticus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halovivax limisalsi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halovenus uversus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halovenus ruber",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halogeometricum formicicum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halogeometricum limi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax lucentensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax mucosum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloferax spartanus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula vallis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloarcula taiwanensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halobellus clavatus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halobellus limi DSM 21969",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halarchaeum rubridurum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halomicrobium zhouii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Haloquadratum walsbyi C23",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Halorhabdus walsbyi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Korarchaeum cryptofilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrosotenuis uzonensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Candidatus Nitrosotalea okcheonensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothrix harundinacea",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoregula alii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanolinea tarda T02",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocella arvoryzae MRE50",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanocella conradii HZ254",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanoculleus receptaculi",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanomicrobium mobile DSM 1539",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanohalophilus portucalensis",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanohalophilus halophilus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosaeta concilii GP6",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanosaeta harundinacea 6Ac",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobrevibacter smithiilei",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanobacterium alcaliphilum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Methanothermococcus thermolithotrophicus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus stetteri",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus zilligii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus barossii",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermococcus sibogae",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus furiosus DSM 3638",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus horikoshii OT3",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Pyrococcus abyssi GE5",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Thermofilum adornatum",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ignicoccus hospitalis KIN4/I",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Ignicoccus pacificus",
+    "domain": "archaea",
+    "target_mb": 100.0
+  },
+  {
+    "name": "Homo sapiens",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Mus musculus",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Drosophila melanogaster",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Saccharomyces cerevisiae",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Arabidopsis thaliana",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Caenorhabditis elegans",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Danio rerio",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Zea mays",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Oryza sativa",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Aspergillus nidulans",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Neurospora crassa",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Plasmodium falciparum",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Dictyostelium discoideum",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Schizosaccharomyces pombe",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Gallus gallus",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Anopheles gambiae",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Monosiga brevicollis",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Emiliania huxleyi",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Toxoplasma gondii",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Chlamydomonas reinhardtii",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Paramecium tetraurelia",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Pan troglodytes",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Macaca mulatta",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Canis lupus familiaris",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Felis catus",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Sus scrofa",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Bos taurus",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Rattus norvegicus",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Xenopus laevis",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Takifugu rubripes",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Strongylocentrotus purpuratus",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Ciona intestinalis",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Branchiostoma floridae",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Nematostella vectensis",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Hydra vulgaris",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Aiptasia pallida",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Escherichia viridis (green algae)",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Physcomitrium patens",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Selaginella moellendorffii",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Marchantia polymorpha",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Picea abies",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Populus trichocarpa",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Vitis vinifera",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Solanum lycopersicum",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Glycine max",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Medicago truncatula",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Brachypodium distachyon",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Ectocarpus siliculosus",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Phaeodactylum tricornutum",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Thalassiosira pseudonana",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Trypanosoma brucei",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Leishmania major",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Giardia lamblia",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Trichomonas vaginalis",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Entamoeba histolytica",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Naegleria gruberi",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Tetrahymena thermophila",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Oxytricha trifallax",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Acanthamoeba castellanii",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Capsaspora owczarzaki",
+    "domain": "eukaryotes",
+    "target_mb": 200.0
+  },
+  {
+    "name": "Bigelowiella natans",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Guillardia theta",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Micromonas pusilla",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Ostreococcus tauri",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Coccomyxa subellipsoidea",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Phytophthora infestans",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Pythium ultimum",
+    "domain": "eukaryotes",
+    "target_mb": 175.0
+  },
+  {
+    "name": "Neurospora tetrasperma",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Candida albicans",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Cryptococcus neoformans",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  },
+  {
+    "name": "Malassezia globosa",
+    "domain": "eukaryotes",
+    "target_mb": 150.0
+  }
+]

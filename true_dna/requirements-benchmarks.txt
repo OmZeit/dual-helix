@@ -1,0 +1,2 @@
+# Optional public benchmark dataset adapters
+genomic-benchmarks

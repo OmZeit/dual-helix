@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible problem in the current main revision.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private genomic data, or security vulnerabilities.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest safe command, configuration, or synthetic input that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Python, PyTorch, CUDA, GPU, and relevant dependency versions.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Remove tokens, personal paths, private data, and other sensitive values before pasting output.
+    validations:
+      required: false

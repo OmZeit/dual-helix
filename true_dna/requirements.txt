@@ -1,0 +1,21 @@
+# Core model and training
+torch>=2.5.0,<3
+numpy==1.26.4
+accelerate>=1.0,<2
+tensorboard>=2.16,<3
+wandb>=0.17,<1
+tokenizers>=0.20,<1
+tqdm==4.67.3
+psutil>=5.9,<8
+
+# Evaluation and visualization
+matplotlib>=3.8,<4
+scikit-learn>=1.4,<2
+
+# Genome acquisition and data preparation
+requests==2.34.2
+rapidfuzz>=3.9,<4
+PyYAML>=6.0,<7
+
+# CUDA and Mamba kernel dependencies for the tested hardware configuration
+# are listed in requirements_rtx5080.txt.

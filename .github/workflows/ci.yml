@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-checks:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            true_dna/requirements.txt
+            true_dna/requirements-dev.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.5.0"
+          python -m pip install -r true_dna/requirements.txt
+          python -m pip install -r true_dna/requirements-dev.txt
+          python -m pip install --no-deps -e .
+
+      - name: Check diff whitespace
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse HEAD~1 >/dev/null 2>&1; then
+            git diff --check HEAD~1..HEAD
+          else
+            git diff-tree --check --root -r HEAD
+          fi
+
+      - name: Compile Python sources
+        run: |
+          python -m compileall -q \
+            true_dna/dna_model \
+            true_dna/scripts \
+            true_dna/tests
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Check formatting
+        run: python -m ruff format --check .
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Audit runtime requirements
+        if: matrix.python-version == '3.12'
+        run: python -m pip_audit -r true_dna/requirements.txt --progress-spinner off
+
+  cpu-container:
+    name: CPU container
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build CPU test image
+        run: docker build --file docker/Dockerfile.cpu --tag true-dna:test .
+
+      - name: Run tests in CPU container
+        run: docker run --rm true-dna:test

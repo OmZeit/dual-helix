@@ -1,0 +1,106 @@
+# Python bytecode and native extensions
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+ENV/
+.conda/
+**/miniconda*/
+**/anaconda*/
+.condarc
+.env
+.env.*
+!.env.example
+.netrc
+.aws/
+.ssh/
+.cache/
+true_dna/.dna_mlm/
+true_dna/.venv_old_*/
+true_dna/.venv_win/
+
+# Credentials, private keys, and local databases
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+secrets*.yaml
+secrets*.yml
+*.sqlite
+*.sqlite3
+*.db
+
+# Test, coverage, and static-analysis caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Generated training data and experiment outputs
+true_dna/data/
+true_dna/experiments/
+true_dna/wandb/
+wandb/
+eval_out*.txt
+wandb_backup/
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
+*.index.json
+*.fa
+*.fasta
+*.fna
+*.fastq
+*.fq
+*.fa.gz
+*.fasta.gz
+*.fna.gz
+*.fastq.gz
+*.fq.gz
+*.log
+
+# Notebook and editor state
+.ipynb_checkpoints/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Vendored / local tool installs
+.audit_tools/
+*.conda
+*.exe
+*.dll
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+
+# Accidental local pip output artifacts
+/true_dna/=*

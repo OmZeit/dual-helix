@@ -1,0 +1,30 @@
+FROM python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
+
+LABEL org.opencontainers.image.title="True DNA CPU test environment" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /workspace
+
+COPY true_dna/requirements.txt true_dna/requirements-dev.txt ./true_dna/
+RUN python -m pip install --upgrade pip \
+    && python -m pip install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch>=2.5.0,<3" \
+    && python -m pip install \
+        -r true_dna/requirements.txt \
+        -r true_dna/requirements-dev.txt
+
+RUN groupadd --gid 10001 true-dna \
+    && useradd --uid 10001 --gid 10001 --create-home true-dna
+
+COPY --chown=true-dna:true-dna . .
+RUN python -m pip install --no-deps .
+
+USER true-dna
+
+CMD ["python", "-m", "pytest", "-q"]

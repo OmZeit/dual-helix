@@ -26,5 +26,5 @@ triton==3.6.0; platform_system == "Linux"
 # Data and command-line tooling
 PyYAML==6.0.3
 psutil==7.2.2
-typer==0.25.1
+typer==0.27.0
 rich==15.0.0

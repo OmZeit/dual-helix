@@ -3,7 +3,7 @@
 # Tested direct-dependency pins for the CUDA 12.8 RTX 5080 setup.
 # Use this file instead of requirements.txt.
 
-torch==2.11.0+cu128
+torch==2.13.0
 torchaudio==2.11.0+cu128
 torchvision==0.26.0+cu128
 numpy==2.4.4

@@ -1,5 +1,5 @@
 # Core model and training
-torch>=2.5.0,<3
+torch>=2.13.0,<3
 numpy==1.26.4
 accelerate>=1.0,<2
 tensorboard>=2.16,<3

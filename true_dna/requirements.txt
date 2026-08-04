@@ -10,7 +10,7 @@ psutil>=5.9,<8
 
 # Evaluation and visualization
 matplotlib>=3.8,<4
-scikit-learn>=1.4,<2
+scikit-learn>=1.9.0,<2
 
 # Genome acquisition and data preparation
 requests==2.34.2

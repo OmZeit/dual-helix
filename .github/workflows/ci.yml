@@ -74,9 +74,9 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-      - name: Audit runtime requirements
+      - name: Audit dependencies
         if: matrix.python-version == '3.12'
-        run: python -m pip_audit -r true_dna/requirements.txt --progress-spinner off
+        run: python -m pip_audit -r true_dna/requirements.txt -r true_dna/requirements-dev.txt --progress-spinner off
 
   cpu-container:
     name: CPU container

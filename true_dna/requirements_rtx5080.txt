@@ -19,7 +19,7 @@ tensorboard==2.20.0
 biopython==1.87
 rapidfuzz==3.14.5
 requests==2.34.2
-packaging==26.2
+packaging==26.3
 ninja==1.13.0
 einops==0.8.2
 transformers==5.16.1

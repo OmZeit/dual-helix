@@ -12,23 +12,54 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from build_taxonomic_manifest import build_manifest as build_taxonomic_manifest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOMAIN_FASTAS = REPO_ROOT / "data" / "domain_fastas"
 DEFAULT_DOMAINS = ("bacteria", "archaea", "eukaryotes")
 TOKENIZER_JSON = REPO_ROOT / "dna_model" / "bpe_vocab" / "tokenizer.json"
+EXAMPLE_CREDENTIAL_VALUES = {"paste-your-ncbi-key-here", "your-email@example.com"}
 
 
-def _run(cmd: list[str], *, cwd: Path = REPO_ROOT) -> None:
-    print("[run]", " ".join(cmd), flush=True)
-    proc = subprocess.run(cmd, cwd=str(cwd))
+def _sanitize_cmd_for_logging(cmd: list[str]) -> str:
+    """Mask sensitive argument values from logged command lines."""
+    sanitized: list[str] = []
+    redact_next = False
+    for arg in cmd:
+        if redact_next:
+            sanitized.append("******")
+            redact_next = False
+        elif arg.lower() in ("--api-key", "--token", "--password", "--secret"):
+            sanitized.append(arg)
+            redact_next = True
+        else:
+            sanitized.append(arg)
+    return " ".join(sanitized)
+
+
+def _run(cmd: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | None = None) -> None:
+    sanitized_cmd = _sanitize_cmd_for_logging(cmd)
+    print("[run]", sanitized_cmd, flush=True)
+    proc = subprocess.run(cmd, cwd=str(cwd), env=env)
     if proc.returncode != 0:
-        raise SystemExit(f"Command failed with exit code {proc.returncode}: {' '.join(cmd)}")
+        raise SystemExit(f"Command failed with exit code {proc.returncode}: {sanitized_cmd}")
+
+
+def clean_ncbi_credential(value: str | None, env_name: str) -> str | None:
+    """Do not forward copied documentation placeholders to NCBI services."""
+    cleaned = str(value or "").strip()
+    if not cleaned or cleaned.casefold() in EXAMPLE_CREDENTIAL_VALUES:
+        if os.getenv(env_name, "").strip().casefold() in EXAMPLE_CREDENTIAL_VALUES:
+            os.environ.pop(env_name, None)
+        return None
+    return cleaned
 
 
 def _inside_repo(path: Path) -> Path:
@@ -57,32 +88,37 @@ def hard_delete_generated_data() -> None:
     """Delete generated corpus/tokenizer artifacts, not source or experiments."""
     DOMAIN_FASTAS.mkdir(parents=True, exist_ok=True)
 
-    patterns = [
-        "*.fa",
-        "*.fasta",
-        "*.index.json",
-        "*_input_ids.npy",
-        "*_kmer_ids.npy",
-        "*_offsets.json",
-    ]
-    for pattern in patterns:
-        for path in DOMAIN_FASTAS.glob(pattern):
+    for domain in DEFAULT_DOMAINS:
+        fasta = DOMAIN_FASTAS / f"{domain}.fa"
+        managed_paths = [
+            fasta,
+            Path(f"{fasta}.index.json"),
+            fasta.with_suffix(".contigs.jsonl"),
+        ]
+        for tokenizer_infix in ("", "_base"):
+            managed_paths.extend(
+                Path(f"{fasta}{tokenizer_infix}{suffix}")
+                for suffix in ("_input_ids.npy", "_kmer_ids.npy", "_offsets.json", "_tokenizer.json")
+            )
+        for path in managed_paths:
             _safe_unlink(path)
 
-    for domain in DEFAULT_DOMAINS:
-        _safe_rmtree(REPO_ROOT / "data" / domain)
-
-    _safe_unlink(TOKENIZER_JSON)
+    # These describe generated corpus contents and splits, not the pinned
+    # taxonomic selection.  Removing them prevents a fresh run from carrying
+    # forward stale provenance or a split that names old records.
+    for filename in ("dataset_manifest.json", "dataset_card.md", "split_manifest.jsonl"):
+        _safe_unlink(DOMAIN_FASTAS / filename)
 
 
 def load_species(path: Path) -> list[dict[str, Any]]:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError("species JSON must be a list of {name, domain, target_mb}")
+    items = data.get("species") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError("species JSON must be a list or an object with a 'species' list")
 
     rows: list[dict[str, Any]] = []
-    for item in data:
+    for item in items:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", "")).strip()
@@ -102,7 +138,11 @@ def load_species(path: Path) -> list[dict[str, Any]]:
                 "display_name": name or query,
                 "tax_id": tax_id or None,
                 "domain": domain,
-                "target_mb": float(item.get("target_mb", 100.0)),
+                "target_mb": float(item.get("target_mb", item.get("weight", 1.0))),
+                "family_tax_id": str(item.get("family_tax_id", "")) or None,
+                "family_name": str(item.get("family_name", "")) or None,
+                "selection_reason": str(item.get("selection_reason", "")) or None,
+                "preferred_refseq_accession": str(item.get("preferred_refseq_accession", "")) or None,
             }
         )
     if not rows:
@@ -131,7 +171,19 @@ def write_scaled_domain_csvs(
         scale = float(target_mb_per_domain) / max(original_total, 1e-9)
         out_path = out_dir / f"{domain}.csv"
         with open(out_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["tax_id", "species", "target_mb"])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "tax_id",
+                    "species",
+                    "target_mb",
+                    "family_tax_id",
+                    "family_name",
+                    "selection_reason",
+                    "preferred_refseq_accession",
+                    "domain",
+                ],
+            )
             writer.writeheader()
             for row in rows:
                 writer.writerow(
@@ -139,6 +191,11 @@ def write_scaled_domain_csvs(
                         "tax_id": row["tax_id"] or "",
                         "species": row["display_name"],
                         "target_mb": f"{float(row['target_mb']) * scale:.6f}",
+                        "family_tax_id": row["family_tax_id"] or "",
+                        "family_name": row["family_name"] or "",
+                        "selection_reason": row["selection_reason"] or "",
+                        "preferred_refseq_accession": row["preferred_refseq_accession"] or "",
+                        "domain": domain,
                     }
                 )
         csv_paths.append(out_path)
@@ -295,24 +352,17 @@ def write_dataset_card(manifest: dict[str, Any], out_path: Path) -> None:
         "- Source: NCBI Datasets / RefSeq preferred",
         "- Machine manifest: data/domain_fastas/dataset_manifest.json",
         "- Dependency file: true_dna/requirements.txt",
-        "- Homology screening dependency: sourmash>=4.9.4 (optional at runtime; near-dedup is skipped with a warning if unavailable)",
+        "- Exact reverse-complement deduplication and sequence-level quality control are applied by this pipeline.",
         "",
         "## Selection Policy",
         "",
         f"- Assembly source: {policy.get('assembly_source', 'RefSeq')}",
-        f"- Assembly version: {policy.get('assembly_version', 'latest')}",
-        f"- Exclude atypical: {_fmt_bool(policy.get('exclude_atypical', True))}",
-        f"- Exclude multi-isolate: {_fmt_bool(policy.get('exclude_multi_isolate', True))}",
-        f"- MAG policy: {policy.get('mag', 'exclude')}",
-        f"- Allow RefSeq-excluded assemblies: {_fmt_bool(policy.get('allow_excluded_from_refseq', False))}",
-        f"- CheckM completeness min: {policy.get('min_checkm_completeness', 90.0)}",
-        f"- CheckM contamination max: {policy.get('max_checkm_contamination', 5.0)}",
-        f"- FCS policy: {policy.get('fcs_policy', 'warn')}",
-        f"- Require FCS record: {_fmt_bool(policy.get('require_fcs', False))}",
-        f"- Near-dedup enabled: {_fmt_bool(policy.get('near_dedup', True))}",
-        f"- Near-dedup threshold: {policy.get('near_dedup_threshold', 0.98)}",
-        f"- Accession lock in: {policy.get('accession_lock_in') or 'none'}",
-        f"- Accession lock out: {policy.get('accession_lock_out') or 'none'}",
+        f"- Minimum contig length: {policy.get('min_length', 1000)}",
+        f"- Maximum N fraction before QC: {policy.get('max_n_fraction', 0.0)}",
+        f"- Exclude plasmids: {_fmt_bool(policy.get('exclude_plasmids', False))}",
+        f"- Exact reverse-complement deduplication: {_fmt_bool(policy.get('exact_reverse_complement_deduplication', True))}",
+        f"- Entropy QC: {policy.get('entropy_qc', 'domain-specific')}",
+        f"- GC policy: {policy.get('gc_filtering', 'measured and reported')}",
         "",
         "## Domain FASTAs",
         "",
@@ -348,8 +398,8 @@ def write_dataset_card(manifest: dict[str, Any], out_path: Path) -> None:
             "## Leakage Controls",
             "",
             "- Exact duplicate removal uses reverse-complement-canonical sequence hashes.",
-            "- Near-duplicate screening uses assembly-level sourmash max-containment when sourmash is installed.",
-            "- Train/eval leakage control should use data/domain_fastas/split_manifest.jsonl with scripts/train.py --split-manifest.",
+            "- Near-homology screening, CheckM, and FCS controls are not performed by this pipeline and must not be claimed from this dataset card.",
+            "- Create an assembly-held-out split with scripts/prepare_ablation_data.py or scripts/build_split_manifest.py before controlled evaluation.",
             "",
         ]
     )
@@ -359,7 +409,9 @@ def write_dataset_card(manifest: dict[str, Any], out_path: Path) -> None:
     print(f"[manifest] wrote {out_path.relative_to(REPO_ROOT)}")
 
 
-def verify_domain_sizes(manifest: dict[str, Any], target_mb: float, tolerance_frac: float) -> None:
+def verify_domain_sizes(
+    manifest: dict[str, Any], target_mb: float, tolerance_frac: float, allowed_underfilled_domains: set[str]
+) -> None:
     low = target_mb * (1.0 - tolerance_frac)
     high = target_mb * (1.0 + tolerance_frac)
     for domain in DEFAULT_DOMAINS:
@@ -367,16 +419,63 @@ def verify_domain_sizes(manifest: dict[str, Any], target_mb: float, tolerance_fr
         if not stats:
             raise ValueError(f"Missing final FASTA for {domain}")
         mb = float(stats["mb"])
+        if mb <= 0:
+            raise ValueError(f"{domain}.fa is empty")
+        if mb < low and domain in allowed_underfilled_domains:
+            print(
+                f"[verify] {domain}: {mb:.1f} MB, {stats['sequences']:,} seqs "
+                f"(documented underfilled domain; target range would be {low:.1f}-{high:.1f} MB)"
+            )
+            continue
         if mb < low or mb > high:
             raise ValueError(f"{domain}.fa size {mb:.1f} MB is outside expected range {low:.1f}-{high:.1f} MB")
         print(f"[verify] {domain}: {mb:.1f} MB, {stats['sequences']:,} seqs")
 
 
+def build_download_command(
+    args: argparse.Namespace, csv_paths: list[Path], storage_budget_mb_per_domain: float
+) -> list[str]:
+    """Build the command for filters the downloader actually implements."""
+    command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts" / "download_data.py"),
+        "--csv",
+        *[str(path) for path in csv_paths],
+        "--fresh",
+        "--fail-on-qc-error",
+        "--parallel-downloads",
+        str(args.parallel_downloads),
+        "--max-assemblies",
+        str(args.max_assemblies),
+        "--overshoot-mb",
+        str(args.overshoot_mb),
+        "--domain-budget-mb",
+        str(storage_budget_mb_per_domain),
+        "--min-length",
+        str(args.min_length),
+        "--max-n-frac",
+        str(args.max_n_frac),
+        "--assembly-source",
+        args.assembly_source,
+        "--scratch-dir",
+        str(args.scratch_dir),
+    ]
+    if args.exclude_plasmids:
+        command.append("--exclude-plasmids")
+    return command
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare fresh balanced RefSeq pretraining data")
-    parser.add_argument("--species-json", default="configs/species.json")
+    parser.add_argument("--species-json", default="configs/species_taxonomically_diverse_v1.json")
+    parser.add_argument(
+        "--selection-manifest",
+        default=None,
+        help="Previously NCBI-validated selection manifest. Reuses its pinned TaxIDs without another taxonomy lookup.",
+    )
     parser.add_argument("--metadata-dir", default="data/metadata/refseq_balanced")
-    parser.add_argument("--target-mb-per-domain", type=float, default=4096.0)
+    parser.add_argument("--target-mb-per-domain", type=float, default=None)
+    parser.add_argument("--target-gb-per-domain", type=float, default=None)
     parser.add_argument("--hard-delete-generated-data", action="store_true")
     parser.add_argument("--run-download", action="store_true")
     parser.add_argument("--rebuild-tokenizer", action="store_true")
@@ -385,39 +484,76 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-path", default="data/domain_fastas/dataset_manifest.json")
     parser.add_argument("--refseq-only", action="store_true")
     parser.add_argument("--assembly-source", choices=["all", "RefSeq", "GenBank"], default="RefSeq")
-    parser.add_argument("--assembly-version", choices=["latest", "all"], default="latest")
-    parser.add_argument("--exclude-atypical", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--exclude-multi-isolate", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--mag", choices=["all", "only", "exclude"], default="exclude")
-    parser.add_argument("--allow-excluded-from-refseq", action="store_true")
-    parser.add_argument("--min-checkm-completeness", type=float, default=90.0)
-    parser.add_argument("--max-checkm-contamination", type=float, default=5.0)
-    parser.add_argument("--max-contigs", type=int, default=0)
-    parser.add_argument("--max-scaffolds", type=int, default=0)
-    parser.add_argument("--accession-lock-in", default=None)
-    parser.add_argument("--accession-lock-out", default="data/domain_fastas/selected_accessions.lock.json")
-    parser.add_argument("--allow-missing-lock-accessions", action="store_true")
-    parser.add_argument("--near-dedup", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--near-dedup-threshold", type=float, default=0.98)
-    parser.add_argument("--near-dedup-ksize", type=int, default=31)
-    parser.add_argument("--near-dedup-scaled", type=int, default=1000)
-    parser.add_argument("--fcs-summary-refseq", default=None)
-    parser.add_argument("--fcs-summary-genbank", default=None)
-    parser.add_argument("--fcs-policy", choices=["off", "warn", "reject"], default=None)
-    parser.add_argument("--require-fcs", action="store_true")
-    parser.add_argument("--parallel-downloads", type=int, default=4)
-    parser.add_argument("--max-assemblies", type=int, default=20000)
-    parser.add_argument("--overshoot-mb", type=int, default=10)
+    parser.add_argument(
+        "--exclude-plasmids", action="store_true", help="Discard contigs labelled as plasmids before QC"
+    )
+    parser.add_argument(
+        "--parallel-downloads",
+        type=int,
+        default=4,
+        help="Bounded concurrent package downloads; filtering and writes remain deterministic (default: 4).",
+    )
+    parser.add_argument("--max-assemblies", type=int, default=1000)
+    parser.add_argument(
+        "--scratch-dir",
+        type=Path,
+        default=Path(os.getenv("TRUE_DNA_NCBI_SCRATCH", Path.home() / ".cache" / "true_dna_ncbi")),
+        help="Temporary NCBI package storage; native WSL storage is recommended.",
+    )
+    parser.add_argument("--overshoot-mb", type=int, default=0)
     parser.add_argument("--min-length", type=int, default=1000)
     parser.add_argument("--max-n-frac", type=float, default=0.0)
-    parser.add_argument("--api-key", default=None)
-    parser.add_argument("--email", default=None)
-    parser.add_argument("--size-tolerance-frac", type=float, default=0.20)
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("NCBI_API_KEY") or os.getenv("NCBI_DATASETS_API_KEY"),
+        help="NCBI API key; prefer exporting NCBI_API_KEY rather than placing a key in shell history.",
+    )
+    parser.add_argument("--email", default=os.getenv("NCBI_TAXONOMY_EMAIL"))
+    parser.add_argument("--size-tolerance-frac", type=float, default=0.15)
+    parser.add_argument(
+        "--allow-underfilled-domain",
+        choices=DEFAULT_DOMAINS,
+        action="append",
+        default=[],
+        help="Document and permit a nonempty domain below the lower size tolerance; repeat for each approved domain.",
+    )
+    parser.add_argument(
+        "--storage-budget-tolerance-frac",
+        type=float,
+        default=None,
+        help="Extra collection headroom above the desired domain target. Defaults to --size-tolerance-frac.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    args.api_key = clean_ncbi_credential(args.api_key, "NCBI_API_KEY")
+    args.email = clean_ncbi_credential(args.email, "NCBI_TAXONOMY_EMAIL")
+    args.scratch_dir = args.scratch_dir.expanduser().resolve()
+    if args.target_mb_per_domain is not None and args.target_gb_per_domain is not None:
+        raise SystemExit("Use only one of --target-mb-per-domain or --target-gb-per-domain")
+    if args.target_mb_per_domain is not None:
+        target_mb_per_domain = float(args.target_mb_per_domain)
+    elif args.target_gb_per_domain is not None:
+        target_mb_per_domain = float(args.target_gb_per_domain) * 1_000.0
+    else:
+        target_mb_per_domain = 5_000.0
+    if target_mb_per_domain <= 0:
+        raise SystemExit("The per-domain target must be positive")
+    if not 0.0 <= args.size_tolerance_frac < 1.0:
+        raise SystemExit("--size-tolerance-frac must be in [0, 1)")
+    if args.storage_budget_tolerance_frac is None:
+        storage_budget_tolerance_frac = float(args.size_tolerance_frac)
+    else:
+        storage_budget_tolerance_frac = float(args.storage_budget_tolerance_frac)
+    if not 0.0 <= storage_budget_tolerance_frac < 1.0:
+        raise SystemExit("--storage-budget-tolerance-frac must be in [0, 1)")
+    storage_budget_mb_per_domain = target_mb_per_domain * (1.0 + storage_budget_tolerance_frac)
+    if args.refseq_only and args.assembly_source == "GenBank":
+        raise SystemExit("--refseq-only conflicts with --assembly-source GenBank")
+    if args.refseq_only:
+        args.assembly_source = "RefSeq"
     species_json = (REPO_ROOT / args.species_json).resolve()
     metadata_dir = (REPO_ROOT / args.metadata_dir).resolve()
     manifest_path = (REPO_ROOT / args.manifest_path).resolve()
@@ -428,81 +564,39 @@ def main() -> int:
     if args.hard_delete_generated_data:
         hard_delete_generated_data()
 
-    rows = load_species(species_json)
+    if args.selection_manifest:
+        selection_path = (REPO_ROOT / args.selection_manifest).resolve()
+        if not selection_path.is_file():
+            raise SystemExit(f"Selection manifest not found: {selection_path}")
+        with selection_path.open(encoding="utf-8") as handle:
+            selection = json.load(handle)
+        if not selection.get("selection_policy", {}).get("tax_id_pinned") or not isinstance(
+            selection.get("species"), list
+        ):
+            raise SystemExit(f"Selection manifest is not a TaxID-pinned manifest: {selection_path}")
+    else:
+        selection_path = metadata_dir / "taxonomic_selection_manifest.json"
+        selection = build_taxonomic_manifest(
+            species_json,
+            selection_path,
+            api_key=args.api_key,
+            email=args.email,
+        )
+    rows = load_species(selection_path)
     csv_paths, csv_summary = write_scaled_domain_csvs(
         rows,
         metadata_dir,
-        target_mb_per_domain=args.target_mb_per_domain,
+        target_mb_per_domain=target_mb_per_domain,
     )
 
     if args.run_download:
-        cmd = [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "download_data.py"),
-            "--csv",
-            *[str(path) for path in csv_paths],
-            "--fresh",
-            "--fail-on-qc-error",
-            "--parallel-downloads",
-            str(args.parallel_downloads),
-            "--max-assemblies",
-            str(args.max_assemblies),
-            "--overshoot-mb",
-            str(args.overshoot_mb),
-            "--min-length",
-            str(args.min_length),
-            "--max-n-frac",
-            str(args.max_n_frac),
-            "--assembly-source",
-            args.assembly_source,
-            "--assembly-version",
-            args.assembly_version,
-            "--mag",
-            args.mag,
-            "--min-checkm-completeness",
-            str(args.min_checkm_completeness),
-            "--max-checkm-contamination",
-            str(args.max_checkm_contamination),
-            "--max-contigs",
-            str(args.max_contigs),
-            "--max-scaffolds",
-            str(args.max_scaffolds),
-            "--near-dedup-threshold",
-            str(args.near_dedup_threshold),
-            "--near-dedup-ksize",
-            str(args.near_dedup_ksize),
-            "--near-dedup-scaled",
-            str(args.near_dedup_scaled),
-        ]
-        if args.refseq_only:
-            cmd.append("--refseq-only")
-        if not args.near_dedup:
-            cmd.append("--no-near-dedup")
-        if args.allow_excluded_from_refseq:
-            cmd.append("--allow-excluded-from-refseq")
-        if not args.exclude_atypical:
-            cmd.append("--no-exclude-atypical")
-        if not args.exclude_multi_isolate:
-            cmd.append("--no-exclude-multi-isolate")
-        if args.accession_lock_in:
-            cmd.extend(["--accession-lock-in", args.accession_lock_in])
-        if args.accession_lock_out:
-            cmd.extend(["--accession-lock-out", args.accession_lock_out])
-        if args.allow_missing_lock_accessions:
-            cmd.append("--allow-missing-lock-accessions")
-        if args.fcs_summary_refseq:
-            cmd.extend(["--fcs-summary-refseq", args.fcs_summary_refseq])
-        if args.fcs_summary_genbank:
-            cmd.extend(["--fcs-summary-genbank", args.fcs_summary_genbank])
-        if args.fcs_policy:
-            cmd.extend(["--fcs-policy", args.fcs_policy])
-        if args.require_fcs:
-            cmd.append("--require-fcs")
+        cmd = build_download_command(args, csv_paths, storage_budget_mb_per_domain)
+        child_env = os.environ.copy()
         if args.api_key:
-            cmd.extend(["--api-key", args.api_key])
+            child_env["NCBI_API_KEY"] = args.api_key
         if args.email:
-            cmd.extend(["--email", args.email])
-        _run(cmd)
+            child_env["NCBI_TAXONOMY_EMAIL"] = args.email
+        _run(cmd, env=child_env)
 
     if args.rebuild_tokenizer:
         fastas = [str(DOMAIN_FASTAS / f"{domain}.fa") for domain in DEFAULT_DOMAINS]
@@ -510,39 +604,37 @@ def main() -> int:
 
     manifest = {}
     if args.write_manifest or args.verify:
+        allowed_underfilled_domains = sorted(set(args.allow_underfilled_domain))
         manifest = write_dataset_manifest(
             csv_summary,
             manifest_path,
             selection_policy={
                 "assembly_source": args.assembly_source,
-                "assembly_version": args.assembly_version,
-                "exclude_atypical": bool(args.exclude_atypical),
-                "exclude_multi_isolate": bool(args.exclude_multi_isolate),
-                "mag": args.mag,
-                "allow_excluded_from_refseq": bool(args.allow_excluded_from_refseq),
-                "min_checkm_completeness": float(args.min_checkm_completeness),
-                "max_checkm_contamination": float(args.max_checkm_contamination),
-                "max_contigs": int(args.max_contigs),
-                "max_scaffolds": int(args.max_scaffolds),
-                "near_dedup": bool(args.near_dedup),
-                "near_dedup_threshold": float(args.near_dedup_threshold),
-                "near_dedup_ksize": int(args.near_dedup_ksize),
-                "near_dedup_scaled": int(args.near_dedup_scaled),
-                "fcs_summary_refseq": args.fcs_summary_refseq,
-                "fcs_summary_genbank": args.fcs_summary_genbank,
-                "fcs_policy": args.fcs_policy
-                or ("reject" if (args.fcs_summary_refseq or args.fcs_summary_genbank) else "warn"),
-                "require_fcs": bool(args.require_fcs),
-                "accession_lock_in": args.accession_lock_in,
-                "accession_lock_out": args.accession_lock_out,
-                "refseq_only_legacy_flag": bool(args.refseq_only),
-                "max_n_frac": float(args.max_n_frac),
                 "min_length": int(args.min_length),
+                "max_n_fraction": float(args.max_n_frac),
+                "exclude_plasmids": bool(args.exclude_plasmids),
+                "exact_reverse_complement_deduplication": True,
+                "entropy_qc": "domain-specific threshold (1.3 bacteria, 1.4 archaea, 1.5 eukaryotes)",
+                "gc_filtering": "not applied; GC is measured and recorded per domain",
+                "refseq_only_legacy_flag": bool(args.refseq_only),
+                "domain_storage_budget_mb": target_mb_per_domain,
+                "domain_size_tolerance_fraction": float(args.size_tolerance_frac),
+                "domain_hard_storage_ceiling_mb": storage_budget_mb_per_domain,
+                "domain_storage_budget_tolerance_fraction": storage_budget_tolerance_frac,
+                "allowed_underfilled_domains": allowed_underfilled_domains,
+                "taxonomic_selection_manifest": str(selection_path.relative_to(REPO_ROOT)),
+                "taxonomic_selection_config_sha256": selection.get("selection_config_sha256"),
+                "max_n_frac": float(args.max_n_frac),
             },
         )
 
     if args.verify:
-        verify_domain_sizes(manifest, args.target_mb_per_domain, args.size_tolerance_frac)
+        verify_domain_sizes(
+            manifest,
+            target_mb_per_domain,
+            args.size_tolerance_frac,
+            set(args.allow_underfilled_domain),
+        )
         print("[verify] strict A/C/G/T checks passed")
 
     return 0

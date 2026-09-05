@@ -74,7 +74,10 @@ backbone runs corresponding forward and reverse-complement streams. Periodic
 cross-strand gates exchange aligned information between them. Exact
 strand-swap parameter tying is optional.
 
-The `legacy` backbone remains available for compatible checkpoints and uses a
+The `bimamba` and `transformer` backbones are controlled-ablation references.
+They each operate at full token resolution and contain only their named primary
+mixer plus a dense FFN; neither contains bridges or the other stream. The
+`legacy` backbone remains available for compatible checkpoints and uses a
 compressed FSHM encoder with an upsample-and-skip path. Backbone choice and all
 shape-defining settings are stored in training checkpoints and must be
 reconstructed when loading them.
@@ -86,10 +89,22 @@ using the input token-embedding matrix as the projection weight, plus a learned
 output bias. With labels, the primary loss is token cross-entropy at selected
 masked positions; padding and unselected positions use the ignore index.
 
-The masking implementation selects contiguous token spans and uses the common
-80/10/10 replacement policy: most selected tokens become `[MASK]`, some become
-random non-special vocabulary tokens, and the rest remain unchanged. The
-training loop can vary the masked fraction with a curriculum.
+The masking implementation supports contiguous spans in tokenizer coordinates
+or in original nucleotide coordinates. The research-v2 tokenizer protocol uses
+base coordinates so base and BPE conditions receive the same intended raw-DNA
+corruptions. Protocol-v2 training replaces every selected target with `[MASK]`;
+the legacy BERT 80/10/10 policy remains available only as the explicit
+`bert_80_10_10` control. Strict evaluation also replaces every selected target
+with `[MASK]`. Explicit masking fractions are honored without hidden clamping,
+and the curriculum varies only the selected-base fraction while retaining the
+configured contiguous span length. Without a curriculum, the default is 15%
+selected coordinates with a three-coordinate span length.
+
+Primary protocol-v2 comparisons use zero label smoothing. If smoothing is
+enabled explicitly, its target mass is distributed only over DNA-bearing
+vocabulary entries, never `[PAD]`, `[UNK]`, `[CLS]`, `[SEP]`, or `[MASK]`.
+This avoids a vocabulary-size-dependent penalty against the 10-entry base
+tokenizer.
 
 Optional training terms include reverse-complement consistency, mixture-of-
 experts routing losses, and the legacy FSHM router loss. Their coefficients are

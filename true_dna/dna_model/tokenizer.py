@@ -327,6 +327,15 @@ class DnaTokenizer:
             return 0
         return len(token) if all(base in _VALID_DNA for base in token) else 0
 
+    def token_sequence(self, token_id: int) -> str:
+        """Return the DNA string represented by a lexical token, or an empty string."""
+        token = self.tokenizer.id_to_token(int(token_id))
+        return token if token is not None and token and all(base in _VALID_DNA for base in token) else ""
+
+    def valid_target_token_ids(self) -> list[int]:
+        """Return DNA-bearing vocabulary IDs eligible for MLM label smoothing."""
+        return [token_id for token_id in range(self.vocab_size) if self.token_base_length(token_id) > 0]
+
 
 class BaseTokenizer:
     def __init__(
@@ -476,6 +485,15 @@ class BaseTokenizer:
     def token_base_length(self, token_id: int) -> int:
         """Every non-special base token represents exactly one base."""
         return 1 if int(token_id) in self.char_to_id.values() else 0
+
+    def token_sequence(self, token_id: int) -> str:
+        """Return the represented nucleotide, excluding control tokens."""
+        value = self.id_to_char.get(int(token_id), "")
+        return value if value in _VALID_DNA else ""
+
+    def valid_target_token_ids(self) -> list[int]:
+        """Return A/C/G/T/N IDs and exclude all control tokens."""
+        return sorted(self.char_to_id.values())
 
 
 def build_tokenizer(

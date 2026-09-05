@@ -4,8 +4,14 @@ import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import LambdaLR, OneCycleLR
 
-from .config import IGNORE_INDEX
+from .config import (
+    DEFAULT_MASK_FRACTION,
+    DEFAULT_MEAN_SPAN_LENGTH,
+    IGNORE_INDEX,
+    SPECIAL_TOKENS_MAX_ID,
+)
 from .masking import gpu_span_mask
+from .sequence_baselines import MaskedBaselineAccumulator
 
 
 def masked_mean_pool(hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
@@ -179,13 +185,19 @@ def evaluate(
     kmer_rc_tables=None,
     lambda_rc=0.0,
     max_batches: int | None = 500,
+    strict_masked_targets: bool = False,
+    mask_coordinate_system: str = "token",
+    mask_seed: int | None = None,
+    baseline_payload: dict | None = None,
 ):
     """Evaluate masked-language modeling at the tokenizer's true granularity.
 
     Base tokenization reports base accuracy and per-base class accuracy. BPE
     reports exact-token accuracy plus loss normalized by the number of DNA
     bases represented by the masked target tokens; it does not mislabel the
-    subset of one-character BPE tokens as base-level accuracy.
+    subset of one-character BPE tokens as base-level accuracy. When
+    ``strict_masked_targets`` is set, every selected target is replaced with
+    ``[MASK]`` rather than using the legacy 80/10/10 MLM replacement policy.
     """
     model.eval()
 
@@ -193,6 +205,12 @@ def evaluate(
     total_correct = 0
     total_count = 0
     total_target_bases = 0
+    total_input_bases = 0
+    total_valid_probability = 0.0
+    total_conditional_nll = 0.0
+    total_special_token_argmax = 0
+    total_conditional_acgt_correct = 0
+    total_conditional_acgt_targets = 0
     tokenizer_type = getattr(tok, "tokenizer_type", "bpe")
     if tokenizer_type not in {"base", "bpe"}:
         raise ValueError(f"Unsupported tokenizer type for evaluation: {tokenizer_type!r}")
@@ -200,6 +218,11 @@ def evaluate(
     # Per-class accuracy is meaningful only when every target token is a base.
     base_names = ["A", "C", "G", "T"]
     base_token_ids = [tok.char_to_id.get(base) for base in base_names] if tokenizer_type == "base" else []
+    base_token_ids_tensor = (
+        torch.tensor(base_token_ids, dtype=torch.long, device=device)
+        if tokenizer_type == "base" and all(token_id is not None for token_id in base_token_ids)
+        else torch.empty(0, dtype=torch.long, device=device)
+    )
     per_class_correct = [0, 0, 0, 0]
     per_class_total = [0, 0, 0, 0]
 
@@ -208,6 +231,9 @@ def evaluate(
         dtype=torch.long,
         device=device,
     )
+    valid_target_ids = list(tok.valid_target_token_ids()) if hasattr(tok, "valid_target_token_ids") else []
+    valid_target_ids_tensor = torch.tensor(valid_target_ids, dtype=torch.long, device=device)
+    baseline_accumulator = MaskedBaselineAccumulator(baseline_payload)
 
     confidence_buckets = [0.0] * 10
     accuracy_buckets = [0.0] * 10
@@ -216,7 +242,8 @@ def evaluate(
     use_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8
     autocast_dtype = torch.bfloat16 if use_bf16 else torch.float16
 
-    eval_generator = torch.Generator(device=device).manual_seed(42 + epoch)
+    resolved_mask_seed = int(42 + epoch if mask_seed is None else mask_seed)
+    eval_generator = torch.Generator(device=device).manual_seed(resolved_mask_seed)
 
     max_steps = None if max_batches is None or max_batches <= 0 else int(max_batches)
     evaluated_batches = 0
@@ -231,6 +258,9 @@ def evaluate(
         kmer_ids = batch.get("kmer_ids")
         if kmer_ids is not None:
             kmer_ids = kmer_ids.to(device, non_blocking=True)
+        token_offsets = batch.get("offsets")
+        if token_offsets is not None:
+            token_offsets = token_offsets.to(device, non_blocking=True)
 
         x_masked, labels, kmer_ids_masked, mask_bool = gpu_span_mask(
             input_ids=input_ids,
@@ -239,11 +269,12 @@ def evaluate(
             kmer_k=getattr(tok, "k_mer_size", None),
             kmer_pad_id=getattr(tok, "kmer_pad_id", None),
             vocab_size=getattr(tok, "vocab_size", 4096),
-            mask_fraction=0.20,
-            mean_span_length=3.0,
+            mask_fraction=DEFAULT_MASK_FRACTION,
+            mean_span_length=DEFAULT_MEAN_SPAN_LENGTH,
             generator=eval_generator,
-            min_frac=0.20,
-            max_frac=0.25,
+            replacement_strategy="mask" if strict_masked_targets else "bert_80_10_10",
+            token_offsets=token_offsets,
+            coordinate_system=mask_coordinate_system,
         )
 
         with torch.amp.autocast(
@@ -280,7 +311,34 @@ def evaluate(
         total_correct += int(correct.sum().item())
         total_count += int(masked.sum().item())
         if masked.any():
+            masked_predictions = pred[masked]
+            total_special_token_argmax += int((masked_predictions <= int(SPECIAL_TOKENS_MAX_ID)).sum().item())
             total_target_bases += int(token_base_lengths[labels[masked]].sum().item())
+            if valid_target_ids_tensor.numel() > 0:
+                masked_logits = logits[masked]
+                target_logits = masked_logits.gather(1, labels[masked].unsqueeze(1)).squeeze(1)
+                valid_log_norm = torch.logsumexp(masked_logits.index_select(1, valid_target_ids_tensor), dim=1)
+                full_log_norm = torch.logsumexp(masked_logits, dim=1)
+                total_conditional_nll += float((valid_log_norm - target_logits).sum().item())
+                total_valid_probability += float(torch.exp(valid_log_norm - full_log_norm).sum().item())
+            if base_token_ids_tensor.numel() > 0:
+                masked_labels = labels[masked]
+                canonical_targets = torch.isin(masked_labels, base_token_ids_tensor)
+                if canonical_targets.any():
+                    canonical_logits = logits[masked][canonical_targets].index_select(1, base_token_ids_tensor)
+                    canonical_predictions = base_token_ids_tensor[canonical_logits.argmax(dim=-1)]
+                    canonical_labels = masked_labels[canonical_targets]
+                    total_conditional_acgt_correct += int((canonical_predictions == canonical_labels).sum().item())
+                    total_conditional_acgt_targets += int(canonical_targets.sum().item())
+        total_input_bases += int(token_base_lengths[input_ids].mul(attention_mask).sum().item())
+
+        baseline_accumulator.update(
+            input_ids=input_ids,
+            token_offsets=token_offsets,
+            mask_bool=masked,
+            tokenizer=tok,
+            domain_names=batch.get("domain_name"),
+        )
 
         # ECE Tracking
         if masked.any():
@@ -323,7 +381,21 @@ def evaluate(
         "masked_bases": total_target_bases,
         "evaluated_batches": evaluated_batches,
         "max_batches": max_steps,
+        "mask_replacement": "mask_only" if strict_masked_targets else "bert_80_10_10",
+        "strict_masked_targets": bool(strict_masked_targets),
+        "mask_coordinate_system": mask_coordinate_system,
+        "mask_seed": resolved_mask_seed,
+        "input_bases": total_input_bases,
+        "masked_base_fraction": total_target_bases / total_input_bases if total_input_bases else None,
+        "special_token_argmax_count": total_special_token_argmax,
+        "special_token_argmax_rate": total_special_token_argmax / total_count,
     }
+    if total_count > 0 and valid_target_ids_tensor.numel() > 0:
+        metrics["mean_valid_target_probability_mass"] = total_valid_probability / total_count
+        metrics["conditional_valid_token_loss"] = total_conditional_nll / total_count
+        if total_target_bases > 0:
+            metrics["conditional_valid_bits_per_base"] = total_conditional_nll / total_target_bases / math.log(2.0)
+    metrics["baselines"] = baseline_accumulator.summary()
 
     ece = 0.0
     if total_count > 0:
@@ -338,6 +410,18 @@ def evaluate(
         metrics["base_accuracy"] = primary_accuracy
         metrics["base_ece"] = ece
         metrics["base_loss"] = token_loss
+        metrics["conditional_acgt_correct"] = total_conditional_acgt_correct
+        metrics["conditional_acgt_targets"] = total_conditional_acgt_targets
+        if total_conditional_acgt_targets > 0:
+            metrics["conditional_acgt_accuracy"] = total_conditional_acgt_correct / total_conditional_acgt_targets
+        # A base token is exactly one nucleotide, so token NLL is base NLL.
+        # Keep this metric available for architecture comparisons that use
+        # the base tokenizer as their common representation.
+        metrics["bits_per_base"] = token_loss / math.log(2.0)
+        try:
+            metrics["base_perplexity"] = math.exp(token_loss)
+        except OverflowError:
+            metrics["base_perplexity"] = float("inf")
         for c, name in enumerate(base_names):
             metrics[f"support_{name}"] = per_class_total[c]
             if per_class_total[c] > 0:

@@ -108,6 +108,7 @@ def test_evaluate_reports_base_accuracy_only_for_base_mode(monkeypatch):
     assert "accuracy_G" not in metrics
     assert "token_accuracy" not in metrics
     assert metrics["masked_bases"] == metrics["masked_tokens"] == 2
+    assert metrics["bits_per_base"] == pytest.approx(metrics["base_loss"] / math.log(2.0))
 
 
 def test_evaluate_reports_bpe_token_and_base_normalized_metrics(monkeypatch):

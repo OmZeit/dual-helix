@@ -183,14 +183,18 @@ class MicroscopeBlock(nn.Module):
         self.norm = RMSNorm(H)
         self.drop_path = DropPath(config.drop_path_rate)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask: torch.Tensor | None = None):
         # x: (B, L, H)
+        if padding_mask is not None:
+            padding_mask = padding_mask.to(device=x.device, dtype=torch.bool)
+            x = x.masked_fill(padding_mask.unsqueeze(-1), 0.0)
         residual = x
         x_norm = self.norm(x)
 
-        out = self.mixer(x_norm)
+        out = self.mixer(x_norm, padding_mask=padding_mask)
 
-        return residual + self.drop_path(out)
+        output = residual + self.drop_path(out)
+        return output if padding_mask is None else output.masked_fill(padding_mask.unsqueeze(-1), 0.0)
 
 
 class TelescopeBlock(nn.Module):
@@ -527,9 +531,9 @@ class DualHelixBackbone(nn.Module):
             if self.config.gradient_checkpointing and self.training:
 
                 def create_block_forward(m_micro, m_tele, m_bridge):
-                    def block_forward(xa, xb, sin, cos, mask):
-                        xa = m_micro(xa)
-                        tele_result = m_tele(xb, src_key_padding_mask=mask, sin=sin, cos=cos)
+                    def block_forward(xa, xb, sin, cos, mask_a, mask_b):
+                        xa = m_micro(xa, padding_mask=mask_a)
+                        tele_result = m_tele(xb, src_key_padding_mask=mask_b, sin=sin, cos=cos)
                         aux, ent = None, None
                         if isinstance(tele_result, tuple):
                             xb = tele_result[0]
@@ -540,12 +544,21 @@ class DualHelixBackbone(nn.Module):
                         if m_bridge is not None:
                             xb = m_bridge.a_to_b(xa, xb)
                             xa = m_bridge.b_to_a(xb, xa)
+                            if mask_a is not None:
+                                xa = xa.masked_fill(mask_a.unsqueeze(-1), 0.0)
                         return xa, xb, aux, ent
 
                     return block_forward
 
                 result = torch.utils.checkpoint.checkpoint(
-                    create_block_forward(micro, tele, bridge), x_a, x_b, sin, cos, mask_b, use_reentrant=False
+                    create_block_forward(micro, tele, bridge),
+                    x_a,
+                    x_b,
+                    sin,
+                    cos,
+                    src_key_padding_mask,
+                    mask_b,
+                    use_reentrant=False,
                 )
                 x_a, x_b, aux, ent = result
                 if aux is not None:
@@ -553,7 +566,7 @@ class DualHelixBackbone(nn.Module):
                 if ent is not None:
                     router_entropies.append(ent)
             else:
-                x_a = micro(x_a)
+                x_a = micro(x_a, padding_mask=src_key_padding_mask)
                 tele_result = tele(
                     x_b,
                     src_key_padding_mask=mask_b,
@@ -580,10 +593,12 @@ class DualHelixBackbone(nn.Module):
                 if bridge is not None:
                     x_b = bridge.a_to_b(x_a, x_b)
                     x_a = bridge.b_to_a(x_b, x_a)
+                    if src_key_padding_mask is not None:
+                        x_a = x_a.masked_fill(src_key_padding_mask.unsqueeze(-1), 0.0)
 
             # RC strand processing (dual-strand mode)
             if self.use_dual_strand and x_a_rc is not None and x_b_rc is not None:
-                x_a_rc = micro(x_a_rc)
+                x_a_rc = micro(x_a_rc, padding_mask=mask_rc)
                 tele_rc_result = tele(x_b_rc, src_key_padding_mask=mask_b_rc, sin=sin_rc, cos=cos_rc)
                 if isinstance(tele_rc_result, tuple):
                     x_b_rc = tele_rc_result[0]
@@ -592,13 +607,21 @@ class DualHelixBackbone(nn.Module):
                 if bridge is not None:
                     x_b_rc = bridge.a_to_b(x_a_rc, x_b_rc)
                     x_a_rc = bridge.b_to_a(x_b_rc, x_a_rc)
+                    if mask_rc is not None:
+                        x_a_rc = x_a_rc.masked_fill(mask_rc.unsqueeze(-1), 0.0)
 
             # Cross-strand gate fusion
             if cross_gate is not None and x_a_rc is not None:
                 x_a, x_a_rc = cross_gate(x_a, x_a_rc)
+                if src_key_padding_mask is not None:
+                    x_a = x_a.masked_fill(src_key_padding_mask.unsqueeze(-1), 0.0)
+                if mask_rc is not None:
+                    x_a_rc = x_a_rc.masked_fill(mask_rc.unsqueeze(-1), 0.0)
 
         # 3. Finalize
         out = self.final_norm(x_a)
+        if src_key_padding_mask is not None:
+            out = out.masked_fill(src_key_padding_mask.unsqueeze(-1), 0.0)
 
         moe_aux_loss = torch.stack(moe_aux_losses).mean() if moe_aux_losses else None
         mean_router_entropy = torch.stack(router_entropies).mean() if router_entropies else None

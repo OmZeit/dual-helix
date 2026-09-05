@@ -6,8 +6,6 @@ from .config import (
     DEFAULT_MEAN_SPAN_LENGTH,
     IGNORE_INDEX,
     MASK_TOKEN_ID,
-    MAX_MASK_FRACTION,
-    MIN_MASK_FRACTION,
     PAD_TOKEN_ID,
     SEP_TOKEN_ID,
     SPECIAL_TOKENS_MAX_ID,
@@ -23,8 +21,9 @@ def bpe_masking(
     special_tokens_max_id=4,
     generator: torch.Generator | None = None,
     motif_importance_weights: dict[int, float] | torch.Tensor | None = None,
+    replacement_strategy: str = "mask",
 ):
-    """Apply RoBERTa-style masking to BPE token IDs."""
+    """Apply independent-token masking to BPE token IDs."""
     if input_ids.ndim != 2:
         raise ValueError(f"input_ids must be rank-2 [B, L], got shape={tuple(input_ids.shape)}")
     if not (0.0 <= float(mask_prob) <= 1.0):
@@ -33,6 +32,10 @@ def bpe_masking(
         raise ValueError(f"vocab_size ({vocab_size}) must be > special_tokens_max_id ({special_tokens_max_id})")
     if not (0 <= int(mask_token_id) < int(vocab_size)):
         raise ValueError(f"mask_token_id ({mask_token_id}) must be in [0, {vocab_size})")
+    if replacement_strategy == "bert":
+        replacement_strategy = "bert_80_10_10"
+    if replacement_strategy not in {"mask", "bert_80_10_10"}:
+        raise ValueError("replacement_strategy must be 'mask' or 'bert_80_10_10'")
 
     x_masked = input_ids.clone()
     labels = torch.full_like(input_ids, IGNORE_INDEX, dtype=torch.long)
@@ -71,31 +74,34 @@ def bpe_masking(
     masked_indices = torch.rand(input_ids.shape, device=input_ids.device, generator=generator) < probability_matrix
     labels[masked_indices] = input_ids[masked_indices]
 
-    replacement_draw = torch.rand(input_ids.shape, device=input_ids.device, generator=generator)
-    indices_replaced = masked_indices & (replacement_draw < 0.8)
-    x_masked[indices_replaced] = mask_token_id
+    if replacement_strategy == "mask":
+        x_masked[masked_indices] = mask_token_id
+    else:
+        replacement_draw = torch.rand(input_ids.shape, device=input_ids.device, generator=generator)
+        indices_replaced = masked_indices & (replacement_draw < 0.8)
+        x_masked[indices_replaced] = mask_token_id
 
-    indices_random = masked_indices & (replacement_draw >= 0.8) & (replacement_draw < 0.9)
-    if indices_random.any():
-        valid_token_ids = torch.arange(0, int(vocab_size), dtype=input_ids.dtype, device=input_ids.device)
-        if special_tokens_max_id >= 0:
-            valid_token_ids = valid_token_ids[valid_token_ids > int(special_tokens_max_id)]
-        for token_id in (PAD_TOKEN_ID, UNK_TOKEN_ID, CLS_TOKEN_ID, SEP_TOKEN_ID, int(mask_token_id)):
-            valid_token_ids = valid_token_ids[valid_token_ids != int(token_id)]
+        indices_random = masked_indices & (replacement_draw >= 0.8) & (replacement_draw < 0.9)
+        if indices_random.any():
+            valid_token_ids = torch.arange(0, int(vocab_size), dtype=input_ids.dtype, device=input_ids.device)
+            if special_tokens_max_id >= 0:
+                valid_token_ids = valid_token_ids[valid_token_ids > int(special_tokens_max_id)]
+            for token_id in (PAD_TOKEN_ID, UNK_TOKEN_ID, CLS_TOKEN_ID, SEP_TOKEN_ID, int(mask_token_id)):
+                valid_token_ids = valid_token_ids[valid_token_ids != int(token_id)]
 
-        if valid_token_ids.numel() == 0:
-            x_masked[indices_random] = mask_token_id
-        else:
-            random_idx = torch.randint(
-                0,
-                int(valid_token_ids.numel()),
-                input_ids.shape,
-                dtype=torch.long,
-                device=input_ids.device,
-                generator=generator,
-            )
-            random_words = valid_token_ids[random_idx]
-            x_masked[indices_random] = random_words[indices_random]
+            if valid_token_ids.numel() == 0:
+                x_masked[indices_random] = mask_token_id
+            else:
+                random_idx = torch.randint(
+                    0,
+                    int(valid_token_ids.numel()),
+                    input_ids.shape,
+                    dtype=torch.long,
+                    device=input_ids.device,
+                    generator=generator,
+                )
+                random_words = valid_token_ids[random_idx]
+                x_masked[indices_random] = random_words[indices_random]
 
     return x_masked, labels
 
@@ -203,6 +209,59 @@ def _span_mask_bool(
     return mask
 
 
+def _base_coordinate_mask_bool(
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    token_offsets: torch.Tensor,
+    *,
+    mask_fraction: float,
+    mean_span_length: float,
+    generator: torch.Generator | None,
+) -> torch.Tensor:
+    """Select raw-base spans and map every overlapping lexical token to a target.
+
+    Sampling happens on the original nucleotide coordinates rather than on
+    tokenizer positions.  Given the same raw windows and generator seed, base
+    and BPE tokenizers therefore receive the same intended corruption spans.
+    A BPE token that straddles a span boundary is masked in full; callers should
+    report the resulting token-covered base count as well as the requested
+    base-coordinate fraction.
+    """
+    if token_offsets.ndim != 3 or token_offsets.shape[:2] != input_ids.shape or token_offsets.shape[-1] != 2:
+        raise ValueError(
+            "token_offsets must have shape [B, L, 2] matching input_ids; "
+            f"got {tuple(token_offsets.shape)} for {tuple(input_ids.shape)}"
+        )
+
+    offsets = token_offsets.to(device=input_ids.device, dtype=torch.long)
+    starts = offsets[..., 0]
+    ends = offsets[..., 1]
+    lexical = attention_mask.bool() & (input_ids > int(SPECIAL_TOKENS_MAX_ID)) & (ends > starts)
+    max_base_length = int(torch.where(lexical, ends, torch.zeros_like(ends)).max().item())
+    if max_base_length <= 0:
+        return torch.zeros_like(input_ids, dtype=torch.bool)
+
+    base_positions = torch.arange(max_base_length, device=input_ids.device).view(1, 1, -1)
+    token_covers_base = (
+        lexical.unsqueeze(-1) & (base_positions >= starts.unsqueeze(-1)) & (base_positions < ends.unsqueeze(-1))
+    )
+    base_attention = token_covers_base.any(dim=1).long()
+
+    synthetic_ids = torch.full_like(base_attention, int(SPECIAL_TOKENS_MAX_ID) + 1)
+    base_mask = _span_mask_bool(
+        synthetic_ids,
+        base_attention,
+        mask_fraction=mask_fraction,
+        mean_span_length=mean_span_length,
+        special_tokens_max_id=-1,
+        vocab_size=int(SPECIAL_TOKENS_MAX_ID) + 2,
+        generator=generator,
+        motif_importance_weights=None,
+    )
+
+    return (token_covers_base & base_mask.unsqueeze(1)).any(dim=-1)
+
+
 def gpu_span_mask(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
@@ -216,12 +275,19 @@ def gpu_span_mask(
     min_frac: float | None = None,
     max_frac: float | None = None,
     motif_importance_weights: dict[int, float] | torch.Tensor | None = None,
+    replacement_strategy: str = "mask",
+    token_offsets: torch.Tensor | None = None,
+    coordinate_system: str = "token",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
     """Apply span masking to BPE token IDs.
 
     ``bpe_masking`` remains available for independent-token RoBERTa masking.
     This compatibility API honors ``mean_span_length`` and returns the same
-    tuple shape used by training and eval utilities.
+    tuple shape used by training and eval utilities. ``replacement_strategy``
+    defaults to ``"mask"``, replacing every selected target with ``[MASK]``.
+    ``"bert_80_10_10"`` retains the legacy 80% mask, 10% random, and 10%
+    unchanged policy as an explicit experimental control. ``"bert"`` remains
+    accepted as a backward-compatible alias.
     """
     if kmer_ids is not None:
         if kmer_k is None or kmer_pad_id is None:
@@ -231,9 +297,20 @@ def gpu_span_mask(
         raise ValueError(
             f"attention_mask shape {tuple(attention_mask.shape)} must match input_ids shape {tuple(input_ids.shape)}"
         )
+    if replacement_strategy == "bert":
+        replacement_strategy = "bert_80_10_10"
+    if replacement_strategy not in {"bert_80_10_10", "mask"}:
+        raise ValueError("replacement_strategy must be 'mask' or 'bert_80_10_10'")
+    if coordinate_system not in {"token", "base"}:
+        raise ValueError("coordinate_system must be 'token' or 'base'")
+    if coordinate_system == "base" and token_offsets is None:
+        raise ValueError("token_offsets are required for base-coordinate masking")
 
-    lo = MIN_MASK_FRACTION if min_frac is None else float(min_frac)
-    hi = MAX_MASK_FRACTION if max_frac is None else float(max_frac)
+    # An explicit requested fraction must not be silently changed. Bounds are
+    # optional caller controls, used by evaluation protocols that deliberately
+    # constrain a schedule.
+    lo = 0.0 if min_frac is None else float(min_frac)
+    hi = 1.0 if max_frac is None else float(max_frac)
     if lo > hi:
         lo, hi = hi, lo
 
@@ -244,45 +321,60 @@ def gpu_span_mask(
     if vocab_size <= MASK_TOKEN_ID:
         raise ValueError(f"vocab_size ({vocab_size}) must be > MASK_TOKEN_ID ({MASK_TOKEN_ID})")
 
-    mask_bool = _span_mask_bool(
-        input_ids,
-        attention_mask,
-        mask_fraction=bounded_mask_fraction,
-        mean_span_length=mean_span_length,
-        special_tokens_max_id=SPECIAL_TOKENS_MAX_ID,
-        vocab_size=int(vocab_size),
-        generator=generator,
-        motif_importance_weights=motif_importance_weights,
-    )
+    if coordinate_system == "base":
+        if motif_importance_weights is not None:
+            raise ValueError("motif importance weights are not supported with base-coordinate masking")
+        mask_bool = _base_coordinate_mask_bool(
+            input_ids,
+            attention_mask,
+            token_offsets,
+            mask_fraction=bounded_mask_fraction,
+            mean_span_length=mean_span_length,
+            generator=generator,
+        )
+    else:
+        mask_bool = _span_mask_bool(
+            input_ids,
+            attention_mask,
+            mask_fraction=bounded_mask_fraction,
+            mean_span_length=mean_span_length,
+            special_tokens_max_id=SPECIAL_TOKENS_MAX_ID,
+            vocab_size=int(vocab_size),
+            generator=generator,
+            motif_importance_weights=motif_importance_weights,
+        )
 
     x_masked = input_ids.clone()
     labels = torch.full_like(input_ids, IGNORE_INDEX, dtype=torch.long)
     labels[mask_bool] = input_ids[mask_bool]
 
-    replacement_draw = torch.rand(input_ids.shape, device=input_ids.device, generator=generator)
-    indices_replaced = mask_bool & (replacement_draw < 0.8)
-    x_masked[indices_replaced] = MASK_TOKEN_ID
+    if replacement_strategy == "mask":
+        x_masked[mask_bool] = MASK_TOKEN_ID
+    else:
+        replacement_draw = torch.rand(input_ids.shape, device=input_ids.device, generator=generator)
+        indices_replaced = mask_bool & (replacement_draw < 0.8)
+        x_masked[indices_replaced] = MASK_TOKEN_ID
 
-    indices_random = mask_bool & (replacement_draw >= 0.8) & (replacement_draw < 0.9)
-    if indices_random.any():
-        valid_token_ids = torch.arange(0, int(vocab_size), dtype=input_ids.dtype, device=input_ids.device)
-        valid_token_ids = valid_token_ids[valid_token_ids > int(SPECIAL_TOKENS_MAX_ID)]
-        for token_id in (PAD_TOKEN_ID, UNK_TOKEN_ID, CLS_TOKEN_ID, SEP_TOKEN_ID, MASK_TOKEN_ID):
-            valid_token_ids = valid_token_ids[valid_token_ids != int(token_id)]
+        indices_random = mask_bool & (replacement_draw >= 0.8) & (replacement_draw < 0.9)
+        if indices_random.any():
+            valid_token_ids = torch.arange(0, int(vocab_size), dtype=input_ids.dtype, device=input_ids.device)
+            valid_token_ids = valid_token_ids[valid_token_ids > int(SPECIAL_TOKENS_MAX_ID)]
+            for token_id in (PAD_TOKEN_ID, UNK_TOKEN_ID, CLS_TOKEN_ID, SEP_TOKEN_ID, MASK_TOKEN_ID):
+                valid_token_ids = valid_token_ids[valid_token_ids != int(token_id)]
 
-        if valid_token_ids.numel() == 0:
-            x_masked[indices_random] = MASK_TOKEN_ID
-        else:
-            random_idx = torch.randint(
-                0,
-                int(valid_token_ids.numel()),
-                input_ids.shape,
-                dtype=torch.long,
-                device=input_ids.device,
-                generator=generator,
-            )
-            random_words = valid_token_ids[random_idx]
-            x_masked[indices_random] = random_words[indices_random]
+            if valid_token_ids.numel() == 0:
+                x_masked[indices_random] = MASK_TOKEN_ID
+            else:
+                random_idx = torch.randint(
+                    0,
+                    int(valid_token_ids.numel()),
+                    input_ids.shape,
+                    dtype=torch.long,
+                    device=input_ids.device,
+                    generator=generator,
+                )
+                random_words = valid_token_ids[random_idx]
+                x_masked[indices_random] = random_words[indices_random]
 
     labels = labels.masked_fill(attention_mask == 0, IGNORE_INDEX)
     mask_bool = labels != IGNORE_INDEX

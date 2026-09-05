@@ -95,6 +95,13 @@ def collate_bpe(batch: list[dict[str, torch.Tensor]], max_length: int = None) ->
             pad_amt = max_length - out["kmer_ids"].shape[1]
             out["kmer_ids"] = torch.nn.functional.pad(out["kmer_ids"], (0, pad_amt), value=KMER_PAD_ID)
 
+    if "offsets" in batch[0]:
+        offsets = [item["offsets"] for item in batch]
+        out["offsets"] = pad_sequence(offsets, batch_first=True, padding_value=0)
+        if max_length is not None and out["offsets"].shape[1] < max_length:
+            pad_amt = max_length - out["offsets"].shape[1]
+            out["offsets"] = torch.nn.functional.pad(out["offsets"], (0, 0, 0, pad_amt), value=0)
+
     if "input_ids_rc" in batch[0]:
         ids_rc = [item["input_ids_rc"] for item in batch]
         masks_rc = [item["attention_mask_rc"] for item in batch]
@@ -129,6 +136,7 @@ class DatasetImpl(Dataset):
         lazy_load: bool = False,
         precomputed_offsets: list[tuple[int, int, int, int]] | None = None,
         frameshift_prob: float = 0.0,
+        return_offsets: bool = False,
     ):
         self.tok = tokenizer
         self.max_length = int(max_length)
@@ -145,6 +153,7 @@ class DatasetImpl(Dataset):
 
         self.use_reverse_prob = float(use_reverse_prob)
         self.frameshift_prob = float(frameshift_prob)
+        self.return_offsets = bool(return_offsets)
         if not 0.0 <= self.use_reverse_prob <= 1.0:
             raise ValueError("use_reverse_prob must be between 0 and 1")
         if not 0.0 <= self.frameshift_prob <= 1.0:
@@ -285,6 +294,17 @@ class DatasetImpl(Dataset):
         """Return lengths of all chunks."""
         return [end - start for _, start, end in self.chunk_coords]
 
+    def window_metadata(self, idx: int) -> dict[str, int]:
+        """Return stable raw-base coordinates for one tokenization-independent window."""
+        seq_idx, start, end = self.chunk_coords[idx]
+        if self.lazy_load:
+            record_index = int(self.seq_offsets[seq_idx][0])
+        elif self.indices is not None:
+            record_index = int(self.indices[seq_idx])
+        else:
+            record_index = int(seq_idx)
+        return {"record_index": record_index, "start": int(start), "end": int(end)}
+
     def _ensure_handle(self):
         if self.worker_file_handle is None and self.file_path:
             self.worker_file_handle = open(self.file_path, "rb")
@@ -316,7 +336,7 @@ class DatasetImpl(Dataset):
         if self.frameshift_prob > 0.0 and rng.random() < self.frameshift_prob:
             subseq = apply_frameshift_perturbation(subseq, rng)
 
-        enc = self.tok.encode(subseq, max_length=self.max_length)
+        enc = self.tok.encode(subseq, max_length=self.max_length, return_offsets=self.return_offsets)
 
         item = {
             "input_ids": enc["input_ids"],
@@ -324,6 +344,8 @@ class DatasetImpl(Dataset):
         }
         if "kmer_ids" in enc:
             item["kmer_ids"] = enc["kmer_ids"]
+        if "offsets" in enc:
+            item["offsets"] = enc["offsets"]
 
         if self.provide_rc:
             subseq_rc = fast_reverse_complement(subseq)

@@ -20,8 +20,8 @@ DEFAULT_MAX_LEN = 4096
 BASES = ["A", "C", "G", "T", "N"]
 
 # Masking constants
-DEFAULT_MASK_FRACTION = 0.30
-DEFAULT_MEAN_SPAN_LENGTH = 6.0
+DEFAULT_MASK_FRACTION = 0.15
+DEFAULT_MEAN_SPAN_LENGTH = 3.0
 MIN_MASK_FRACTION = 0.20
 MAX_MASK_FRACTION = 0.40
 
@@ -225,12 +225,12 @@ class DnaConfig:
         self.mamba2_head_dim = int(mamba2_head_dim)
         self.mamba2_ngroups = int(mamba2_ngroups)
         backbone_name = str(backbone).lower()
-        if backbone_name not in {"dual_helix", "legacy"}:
+        if backbone_name not in {"dual_helix", "bimamba", "transformer", "legacy"}:
             LOGGER.error(
-                "Unsupported backbone '%s'; not falling back to legacy/Transformer.",
+                "Unsupported backbone '%s'; not falling back to another architecture.",
                 backbone,
             )
-            raise ValueError(f"backbone must be one of dual_helix or legacy; got {backbone!r}")
+            raise ValueError(f"backbone must be one of dual_helix, bimamba, transformer, or legacy; got {backbone!r}")
         self.backbone = backbone_name
         self.dual_helix_bridge_interval = int(dual_helix_bridge_interval)
         self.disable_bridge = bool(disable_bridge)

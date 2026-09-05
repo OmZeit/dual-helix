@@ -33,6 +33,7 @@ from dna_model.checkpoint_loading import (
 )
 from dna_model.config import DEFAULT_MASK_FRACTION, DEFAULT_MEAN_SPAN_LENGTH, IGNORE_INDEX, DnaConfig
 from dna_model.loaders import build_loaders_balanced
+from dna_model.losses import dna_target_cross_entropy
 from dna_model.masking import gpu_span_mask
 from dna_model.model import DnaModel
 from dna_model.tokenizer import build_tokenizer, normalize_tokenizer_type
@@ -73,6 +74,10 @@ def _configure_wandb_metrics() -> None:
         wandb.define_metric("train/*", step_metric="global_step")
         wandb.define_metric("eval/*", step_metric="global_step")
         wandb.define_metric("gates/*", step_metric="global_step")
+        # W&B's automatic system monitor is not guaranteed to emit GPU memory
+        # samples on every platform.  These are explicit PyTorch allocator
+        # measurements, which makes memory comparable across ablation runs.
+        wandb.define_metric("resource/*", step_metric="global_step")
     except Exception as e:
         logging.warning("Could not configure W&B metric axes: %s", e)
 
@@ -143,6 +148,50 @@ def _cuda_memory_metrics(device) -> dict[str, int]:
     }
 
 
+def _wandb_cuda_memory_metrics(device) -> dict[str, float]:
+    """Return allocator memory measurements in MiB for W&B time-series logs.
+
+    ``max_*`` values are peaks since the start of the current invocation (or
+    since a resumed invocation began), not a sampled approximation.  They are
+    intentionally logged under ``resource/`` rather than ``system/`` so they
+    cannot be confused with W&B's optional system-monitor metrics.
+    """
+
+    raw = _cuda_memory_metrics(device)
+    if not raw:
+        return {}
+    mib = float(1024**2)
+    return {
+        "resource/cuda_allocated_mib": raw["memory_allocated_bytes"] / mib,
+        "resource/cuda_reserved_mib": raw["memory_reserved_bytes"] / mib,
+        "resource/cuda_peak_allocated_mib": raw["max_memory_allocated_bytes"] / mib,
+        "resource/cuda_peak_reserved_mib": raw["max_memory_reserved_bytes"] / mib,
+    }
+
+
+def write_run_summary(
+    run_dir: str | Path,
+    *,
+    global_step: int,
+    total_params: int,
+    final_eval,
+    device,
+) -> None:
+    """Atomically persist final metrics needed by benchmark manifests."""
+    output_dir = Path(run_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "schema_version": 1,
+        "global_step": int(global_step),
+        "parameters": int(total_params),
+        "final_eval": _metric_value(final_eval),
+        "cuda_memory": _cuda_memory_metrics(device),
+    }
+    temporary = output_dir / "run_summary.tmp"
+    temporary.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    temporary.replace(output_dir / "run_summary.json")
+
+
 # Reproducibility and performance
 
 
@@ -162,6 +211,7 @@ def maybe_enable_tf32(args, device):
             if cap[0] >= 8:
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.backends.cudnn.allow_tf32 = True
+                torch.set_float32_matmul_precision("high")
                 print("[OK] TF32 enabled (Ampere+ GPU detected).")
             else:
                 print(f"[WARN] TF32 requested but GPU compute capability {cap[0]}.{cap[1]} < 8.0")
@@ -256,6 +306,8 @@ def step_mask_and_forward(
     teacher_model=None,
     kd_temp=2.0,
     alpha_kd=0.5,
+    mask_coordinate_system="token",
+    mask_replacement_strategy="mask",
 ):
     """Run one masked-language-modeling forward pass."""
     input_ids = batch["input_ids"].to(device, non_blocking=True)
@@ -263,6 +315,9 @@ def step_mask_and_forward(
     kmer_ids = batch.get("kmer_ids")
     if kmer_ids is not None:
         kmer_ids = kmer_ids.to(device, non_blocking=True)
+    token_offsets = batch.get("offsets")
+    if token_offsets is not None:
+        token_offsets = token_offsets.to(device, non_blocking=True)
 
     vocab_size = getattr(tokenizer, "vocab_size", 4096)
 
@@ -276,6 +331,9 @@ def step_mask_and_forward(
         mask_fraction=mask_fraction,
         mean_span_length=mean_span_length,
         generator=generator,
+        replacement_strategy=mask_replacement_strategy,
+        token_offsets=token_offsets,
+        coordinate_system=mask_coordinate_system,
     )
 
     context = (
@@ -305,12 +363,15 @@ def step_mask_and_forward(
 
         masked = labels != IGNORE_INDEX
         if masked.any():
-            loss = F.cross_entropy(
+            valid_target_ids = (
+                tokenizer.valid_target_token_ids() if hasattr(tokenizer, "valid_target_token_ids") else None
+            )
+            loss = dna_target_cross_entropy(
                 logits[masked].view(-1, logits.size(-1)),
                 labels[masked].view(-1),
-                reduction="mean",
-                weight=class_weights,
                 label_smoothing=label_smoothing,
+                valid_target_ids=valid_target_ids,
+                class_weights=class_weights,
             )
         else:
             loss = logits.sum() * 0.0
@@ -367,24 +428,27 @@ class MaskingCurriculum:
         warmup_frac: float = 0.4,
         mask_start: float = 0.15,
         mask_end: float = 0.30,
+        mean_span_length: float = DEFAULT_MEAN_SPAN_LENGTH,
     ):
         self.warmup_steps = int(total_steps * warmup_frac)
         self.mask_start = mask_start
         self.mask_end = mask_end
+        self.mean_span_length = float(mean_span_length)
 
         print("\n[Masking Curriculum] Enabled (Cosine, mask-fraction only):")
         print(f"  Steps: 0 -> {self.warmup_steps} (then hold at {mask_end:.2f})")
         print(f"  Mask fraction: {mask_start:.2f} -> {mask_end:.2f}")
+        print(f"  Mean span length: {self.mean_span_length:.2f} bases")
 
     def get_params(self, current_step: int):
-        """Returns (mask_fraction, mean_span_length).  span_length is always 1.0."""
+        """Return the scheduled mask fraction and configured span length."""
         if current_step >= self.warmup_steps:
-            return self.mask_end, 1.0
+            return self.mask_end, self.mean_span_length
 
         p_linear = float(current_step) / float(max(1, self.warmup_steps))
         p_cosine = 0.5 * (1.0 - math.cos(math.pi * p_linear))
         mask_val = self.mask_start + (self.mask_end - self.mask_start) * p_cosine
-        return mask_val, 1.0
+        return mask_val, self.mean_span_length
 
 
 def compute_class_weights_from_loader(
@@ -508,6 +572,12 @@ def parse_args():
         help="BPE tokenizer.json path (ignored for base tokenization)",
     )
     data_grp.add_argument("--fasta", nargs="+", required=True, help="FASTA files or glob patterns")
+    data_grp.add_argument(
+        "--split-manifest",
+        "--split_manifest",
+        default=None,
+        help="Optional JSONL train/eval assignment manifest created by scripts/build_split_manifest.py",
+    )
     data_grp.add_argument("--save_dir", type=str, default="experiments/exp1", help="Directory for logs and checkpoints")
     data_grp.add_argument("--max_length", type=int, default=4096, help="Maximum sequence length")
     data_grp.add_argument("--stride", type=int, default=0, help="Stride for chunking (0 = max_length)")
@@ -556,8 +626,22 @@ def parse_args():
         "--backbone",
         type=str,
         default="dual_helix",
-        choices=["dual_helix", "legacy"],
-        help="Backbone architecture. DualHelix is the default; legacy is an explicit ablation path.",
+        choices=["dual_helix", "bimamba", "transformer", "legacy"],
+        help="Backbone architecture. bimamba and transformer are full-resolution controlled-ablation references.",
+    )
+    model_grp.add_argument(
+        "--use-kmer-mix",
+        "--use_kmer_mix",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the aligned k-mer embedding side channel.",
+    )
+    model_grp.add_argument(
+        "--no-kmer-mix",
+        "--no_kmer_mix",
+        action="store_false",
+        dest="use_kmer_mix",
+        help="Compatibility alias for --no-use-kmer-mix.",
     )
     model_grp.add_argument("--use_moe", action="store_true", help="Use Mixture-of-Experts in Telescope stream")
     model_grp.add_argument("--moe_num_experts", type=int, default=8, help="Number of MoE experts")
@@ -620,8 +704,15 @@ def parse_args():
     train_grp.add_argument("--amp", action="store_true", help="Enable AMP (Automatic Mixed Precision)")
     train_grp.add_argument("--tf32", action="store_true", help="Enable TF32 on Ampere+")
     train_grp.add_argument("--compile", action="store_true", help="Use torch.compile")
+    train_grp.add_argument(
+        "--compile_mode",
+        choices=["default", "reduce-overhead", "max-autotune"],
+        default="default",
+        help="torch.compile mode; reduce-overhead reduces Python/kernel-launch overhead for stable shapes",
+    )
     train_grp.add_argument("--use_ema", action="store_true", help="Use Exponential Moving Average")
     train_grp.add_argument("--use_class_weights", action="store_true", help="Use inverse frequency class weights")
+    train_grp.add_argument("--seed", type=int, default=42, help="Random seed for model, loader, and masking RNGs")
 
     train_grp.add_argument(
         "--lambda_rc_consist", type=float, default=0.1, help="Weight for asymmetric RC consistency loss"
@@ -633,9 +724,38 @@ def parse_args():
 
     train_grp.add_argument("--reset_scheduler", action="store_true", help="Reset LR scheduler/optimizer on resume")
     train_grp.add_argument("--use_curriculum", action="store_true", help="Enable masking curriculum")
+    train_grp.add_argument(
+        "--mask_fraction",
+        type=float,
+        default=DEFAULT_MASK_FRACTION,
+        help="Selected-token/base fraction when the masking curriculum is disabled",
+    )
     train_grp.add_argument("--mask_start", type=float, default=0.15, help="Starting mask fraction for curriculum")
     train_grp.add_argument("--mask_end", type=float, default=0.35, help="Ending mask fraction for curriculum")
-    train_grp.add_argument("--label_smoothing", type=float, default=0.05, help="Label smoothing factor (e.g. 0.1)")
+    train_grp.add_argument(
+        "--mean_span_length",
+        type=float,
+        default=DEFAULT_MEAN_SPAN_LENGTH,
+        help="Mean contiguous corruption-span length in the selected coordinate system",
+    )
+    train_grp.add_argument(
+        "--label_smoothing",
+        type=float,
+        default=0.0,
+        help="DNA-target-only label smoothing; the controlled research protocol uses 0.0",
+    )
+    train_grp.add_argument(
+        "--mask-coordinate-system",
+        choices=["token", "base"],
+        default="token",
+        help="Sample corruption spans in tokenizer positions or original nucleotide coordinates",
+    )
+    train_grp.add_argument(
+        "--mask-replacement-strategy",
+        choices=["mask", "bert_80_10_10"],
+        default="mask",
+        help="Replace every selected target with [MASK], or reproduce BERT's legacy 80/10/10 policy",
+    )
     train_grp.add_argument(
         "--lambda_boundary", type=float, default=0.0, help="Weight for boundary prediction auxiliary loss"
     )
@@ -679,6 +799,14 @@ def parse_args():
         "--eval_max_batches", type=int, default=500, help="Maximum eval batches per training eval (0 = full eval set)"
     )
     log_grp.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
+    log_grp.add_argument("--wandb-name", default=None, help="Optional explicit W&B run name")
+    log_grp.add_argument("--wandb-group", default=None, help="Optional explicit W&B run group")
+    log_grp.add_argument("--wandb-job-type", default=None, help="Optional explicit W&B job type")
+    log_grp.add_argument(
+        "--wandb-tags",
+        default="",
+        help="Comma-separated W&B tags. Empty entries are ignored.",
+    )
 
     # Knowledge Distillation
     kd_grp = p.add_argument_group("Knowledge Distillation")
@@ -756,6 +884,7 @@ def _validate_training_args(args: argparse.Namespace) -> None:
         "log_interval": args.log_interval,
         "eval_interval": args.eval_interval,
         "temperature": args.temperature,
+        "mean_span_length": args.mean_span_length,
     }
     for name, value in positive.items():
         if value <= 0:
@@ -783,6 +912,7 @@ def _validate_training_args(args: argparse.Namespace) -> None:
         "use_reverse_prob": args.use_reverse_prob,
         "frameshift_prob": args.frameshift_prob,
         "rc_loss_prob": args.rc_loss_prob,
+        "mask_fraction": args.mask_fraction,
         "mask_start": args.mask_start,
         "mask_end": args.mask_end,
         "alpha_kd": args.alpha_kd,
@@ -809,7 +939,7 @@ def _build_model_config(args: argparse.Namespace, tokenizer) -> DnaConfig:
         cls_token_id=tokenizer.cls_token_id,
         sep_token_id=tokenizer.sep_token_id,
         unk_token_id=tokenizer.unk_token_id,
-        use_kmer_mix=True,
+        use_kmer_mix=args.use_kmer_mix,
         kmer_size=tokenizer.kmer_size,
         kmer_vocab_size=tokenizer.kmer_vocab_size,
         hidden_size=args.hidden_size,
@@ -870,7 +1000,7 @@ def main():
     else:
         args.use_mamba2 = args.mamba_version == "mamba2"
     k_mer_sizes = _parse_k_mer_sizes(args.k_mer_sizes)
-    seed_all(42)
+    seed_all(args.seed)
 
     if args.print_params_only:
         tok = build_tokenizer(
@@ -899,7 +1029,17 @@ def main():
 
     writer = None
     if not args.no_wandb and accelerator.is_main_process:
-        wandb.init(project="dna-language-model", config=vars(args))
+        wandb_kwargs = {"project": "dna-language-model", "config": vars(args)}
+        if args.wandb_name:
+            wandb_kwargs["name"] = args.wandb_name
+        if args.wandb_group:
+            wandb_kwargs["group"] = args.wandb_group
+        if args.wandb_job_type:
+            wandb_kwargs["job_type"] = args.wandb_job_type
+        tags = [tag.strip() for tag in args.wandb_tags.split(",") if tag.strip()]
+        if tags:
+            wandb_kwargs["tags"] = tags
+        wandb.init(**wandb_kwargs)
         _configure_wandb_metrics()
 
     if accelerator.is_main_process:
@@ -964,6 +1104,9 @@ def main():
             pin_memory=args.pin_memory,
             gc_metadata_file=args.stratify_gc,
             stratify_gc=bool(args.stratify_gc),
+            split_manifest=args.split_manifest,
+            seed=args.seed,
+            return_offsets=args.mask_coordinate_system == "base",
         )
     else:
         train_loader, eval_loader = build_loaders_balanced(
@@ -982,6 +1125,9 @@ def main():
             cap_by_file=cap_by_file,
             pin_memory=args.pin_memory,
             use_smart_batching=args.use_smart_batching,
+            split_manifest=args.split_manifest,
+            seed=args.seed,
+            return_offsets=args.mask_coordinate_system == "base",
         )
 
     print(f"[OK] Data loaders ready. Train batches: {len(train_loader)}, Eval batches: {len(eval_loader)}", flush=True)
@@ -1006,9 +1152,9 @@ def main():
     print(f"[OK] Model created. Total params: {total_params / 1e6:.2f}M", flush=True)
 
     if args.compile:
-        print("[INFO] Compiling model with torch.compile...")
+        print(f"[INFO] Compiling model with torch.compile(mode={args.compile_mode})...")
         try:
-            model = torch.compile(model)
+            model = torch.compile(model, mode=args.compile_mode)
         except Exception as e:
             print(f"[WARNING] torch.compile failed: {e}")
             print("[WARNING] Proceeding without compilation (eager mode).")
@@ -1149,6 +1295,7 @@ def main():
             warmup_frac=0.4,
             mask_start=args.mask_start,
             mask_end=args.mask_end,
+            mean_span_length=args.mean_span_length,
         )
 
     # Resume from checkpoint
@@ -1189,6 +1336,17 @@ def main():
     ):
         masked_tokens = int(mask_bool.sum().item()) if mask_bool is not None else None
         batch_tokens = int(input_ids.numel()) if input_ids is not None else None
+        masked_bases = None
+        batch_bases = None
+        if input_ids is not None:
+            base_lengths = torch.tensor(
+                [tok.token_base_length(token_id) for token_id in range(tok.vocab_size)],
+                dtype=torch.long,
+                device=input_ids.device,
+            )
+            batch_bases = int(base_lengths[input_ids].sum().item())
+            if mask_bool is not None:
+                masked_bases = int(base_lengths[input_ids[mask_bool]].sum().item())
         train_metrics = {
             "loss": _metric_value(train_loss),
             "lr": _metric_value(lr_curr),
@@ -1205,6 +1363,14 @@ def main():
             "masked_fraction_actual": _metric_value(
                 float(masked_tokens) / float(batch_tokens) if masked_tokens is not None and batch_tokens else None
             ),
+            "masked_bases": _metric_value(masked_bases),
+            "batch_bases": _metric_value(batch_bases),
+            "masked_base_fraction_actual": _metric_value(
+                float(masked_bases) / float(batch_bases) if masked_bases is not None and batch_bases else None
+            ),
+            "mask_coordinate_system": args.mask_coordinate_system,
+            "mask_replacement_strategy": args.mask_replacement_strategy,
+            "eval_replacement_strategy": "mask",
         }
         eval_clean = _metric_value(eval_metrics or {})
         metrics = {
@@ -1353,6 +1519,13 @@ def main():
             sys.exit(1)
     else:
         resume_epoch_offset = 0
+
+    # Do not let tokenizer/model construction or checkpoint loading inflate the
+    # training-memory comparison.  Checkpoint metadata and W&B both receive
+    # allocator peaks measured from this point onward.
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
     print("\n" + "=" * 80)
     print("STARTING TRAINING")
     print("=" * 80)
@@ -1374,7 +1547,8 @@ def main():
         if first_epoch_resume:
             epoch_step = resume_epoch_offset
 
-        g = torch.Generator(device=device).manual_seed(1234 + epoch)
+        # Keep masking reproducible while allowing independent seeded runs.
+        g = torch.Generator(device=device).manual_seed(args.seed + 1234 + epoch)
 
         print(f"\n==== Epoch {epoch + 1}/{args.epochs} ====", flush=True)
 
@@ -1433,7 +1607,7 @@ def main():
                     domain_counts[dnames] += 1
 
             # Curriculum (Masking)
-            frac_mask, span_len = DEFAULT_MASK_FRACTION, DEFAULT_MEAN_SPAN_LENGTH
+            frac_mask, span_len = args.mask_fraction, args.mean_span_length
             if curriculum:
                 frac_mask, span_len = curriculum.get_params(global_step)
 
@@ -1474,6 +1648,8 @@ def main():
                 teacher_model=teacher_model,
                 kd_temp=args.temperature,
                 alpha_kd=args.alpha_kd,
+                mask_coordinate_system=args.mask_coordinate_system,
+                mask_replacement_strategy=args.mask_replacement_strategy,
             )
 
             # Separate aux losses to avoid implicit coupling between:
@@ -1501,10 +1677,17 @@ def main():
                             attention_mask=rc_attention_mask,
                             kmer_ids=rc_kmer_ids,
                         )
-                        embed_rc = masked_mean_pool(
-                            rc_out["last_hidden_state"],
-                            rc_attention_mask,
-                        ).detach()
+                        embed_rc = (
+                            masked_mean_pool(
+                                rc_out["last_hidden_state"],
+                                rc_attention_mask,
+                                # A detached view can still alias a CUDA-Graph output.
+                                # The next model invocation in this same optimizer step
+                                # would then overwrite it before the RC loss consumes it.
+                            )
+                            .detach()
+                            .clone()
+                        )
 
                     fwd_clean = model(
                         input_ids=batch["input_ids"].to(device, non_blocking=True),
@@ -1609,6 +1792,7 @@ def main():
                         domain_counts.clear()
 
                     log_dict.update(_drain_gate_stats())
+                    log_dict.update(_wandb_cuda_memory_metrics(device))
 
                     if accelerator.is_main_process and not args.no_wandb:
                         wandb.log(log_dict)
@@ -1661,6 +1845,9 @@ def main():
                         kmer_rc_tables=None,  # No RC tables during eval.
                         lambda_rc=0.0,
                         max_batches=args.eval_max_batches,
+                        strict_masked_targets=True,
+                        mask_coordinate_system=args.mask_coordinate_system,
+                        mask_seed=args.seed,
                     )
 
                     if device.type == "cuda":
@@ -1704,6 +1891,7 @@ def main():
                     if accelerator.is_main_process:
                         _append_eval_history(args.save_dir, rec)
                         eval_log_payload = build_eval_log_payload(rec, eval_metrics)
+                        eval_log_payload.update(_wandb_cuda_memory_metrics(device))
                         log_eval_to_tensorboard(writer, eval_log_payload, global_step)
                         if not args.no_wandb:
                             wandb.log(eval_log_payload)
@@ -1891,6 +2079,14 @@ def main():
     print("\n" + "=" * 80)
     print("TRAINING COMPLETE")
     print("=" * 80)
+    if accelerator.is_main_process:
+        write_run_summary(
+            args.save_dir,
+            global_step=global_step,
+            total_params=total_params,
+            final_eval=last_eval_metrics,
+            device=device,
+        )
     if accelerator.is_main_process and writer is not None:
         writer.close()
     if not args.no_wandb:

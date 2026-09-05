@@ -10,6 +10,9 @@ def test_training_wandb_logs_use_custom_optimizer_step_axis():
     assert 'wandb.define_metric("train/*", step_metric="global_step")' in text
     assert 'wandb.define_metric("eval/*", step_metric="global_step")' in text
     assert 'wandb.define_metric("gates/*", step_metric="global_step")' in text
+    assert 'wandb.define_metric("resource/*", step_metric="global_step")' in text
+    assert "resource/cuda_peak_allocated_mib" in text
+    assert "resource/cuda_peak_reserved_mib" in text
     assert "wandb.log(log_dict)" in text
     assert "wandb.log(eval_log_payload)" in text
     assert "wandb.log(log_dict, step=global_step)" not in text

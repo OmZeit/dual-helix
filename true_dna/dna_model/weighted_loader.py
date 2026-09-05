@@ -165,6 +165,9 @@ def build_loaders_weighted(
     steps_per_epoch: int | None = None,
     gc_metadata_file: str | None = None,
     stratify_gc: bool = False,
+    split_manifest: str | None = None,
+    seed: int = 42,
+    return_offsets: bool = False,
 ):
     """Build record-disjoint loaders with weighted training-file sampling."""
     from .loaders import build_loaders_balanced
@@ -239,6 +242,9 @@ def build_loaders_weighted(
         cap_by_file=cap_by_file,
         pin_memory=pin_memory,
         prefetch_factor=prefetch_factor,
+        split_manifest=split_manifest,
+        seed=seed,
+        return_offsets=return_offsets,
     )
 
     # Wrap in weighted loader if possible
@@ -248,7 +254,7 @@ def build_loaders_weighted(
             weights=weights,
             names=train_rr.names,
             steps_per_epoch=steps_per_epoch,
-            seed=42,
+            seed=seed,
         )
         return weighted_train, eval_loader
 

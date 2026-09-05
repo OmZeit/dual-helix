@@ -294,18 +294,35 @@ class BiMamba(nn.Module):
         # Project 2*d_model -> d_model
         self.out_proj = nn.Linear(2 * d_model, d_model)
 
-    def forward(self, x):
+    @staticmethod
+    def _reverse_valid_prefix(x: torch.Tensor, padding_mask: torch.Tensor) -> torch.Tensor:
+        """Reverse each right-padded sample without moving padding before valid tokens."""
+        if padding_mask.shape != x.shape[:2]:
+            raise ValueError(
+                f"padding_mask shape {tuple(padding_mask.shape)} does not match sequence shape {tuple(x.shape[:2])}"
+            )
+        padding_mask = padding_mask.to(device=x.device, dtype=torch.bool)
+        valid_lengths = (~padding_mask).sum(dim=1, keepdim=True)
+        positions = torch.arange(x.size(1), device=x.device).unsqueeze(0).expand(x.size(0), -1)
+        reverse_positions = torch.where(positions < valid_lengths, valid_lengths - 1 - positions, positions)
+        return x.gather(1, reverse_positions.unsqueeze(-1).expand_as(x))
+
+    def forward(self, x, padding_mask: torch.Tensor | None = None):
         # x: (B, L, D)
+        if padding_mask is not None:
+            padding_mask = padding_mask.to(device=x.device, dtype=torch.bool)
+            x = x.masked_fill(padding_mask.unsqueeze(-1), 0.0)
         x_fwd = self.fwd(x)
 
         # Backward pass: flip, run, flip back
-        x_rev = x.flip([1])
+        x_rev = x.flip([1]) if padding_mask is None else self._reverse_valid_prefix(x, padding_mask)
         x_bwd_raw = self.bwd(x_rev)  # (B, L, D) - in reversed coordinate space
-        x_bwd = x_bwd_raw.flip([1])  # flip back to original coordinate space
+        x_bwd = x_bwd_raw.flip([1]) if padding_mask is None else self._reverse_valid_prefix(x_bwd_raw, padding_mask)
 
         # Concat and project
         x_cat = torch.cat([x_fwd, x_bwd], dim=-1)
-        return self.out_proj(x_cat)
+        output = self.out_proj(x_cat)
+        return output if padding_mask is None else output.masked_fill(padding_mask.unsqueeze(-1), 0.0)
 
 
 class MoEExpert(nn.Module):

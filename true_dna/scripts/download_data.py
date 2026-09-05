@@ -24,6 +24,8 @@ SEQ_QC = REPO_ROOT / "scripts" / "tools" / "sequence_qc.py"
 PRINT_QC = REPO_ROOT / "scripts" / "tools" / "print_qc_summary.py"
 
 DOMAIN_FASTAS_DIR = REPO_ROOT / "data" / "domain_fastas"
+EXAMPLE_CREDENTIAL_VALUES = {"paste-your-ncbi-key-here", "your-email@example.com"}
+GENERATED_DIR_MARKER = ".true_dna_generated"
 
 # Domain-specific QC thresholds
 DOMAIN_THRESHOLDS = {
@@ -58,12 +60,30 @@ def run(
 
 def ensure_empty_dir(p: Path) -> None:
     if p.exists():
+        if not p.is_dir():
+            raise RuntimeError(f"Refusing to replace non-directory path: {p}")
+        if any(p.iterdir()) and not (p / GENERATED_DIR_MARKER).is_file():
+            raise RuntimeError(
+                f"Refusing to delete {p}: directory is not owned by the True DNA data pipeline "
+                f"(missing {GENERATED_DIR_MARKER})"
+            )
         shutil.rmtree(p)
     p.mkdir(parents=True, exist_ok=True)
+    (p / GENERATED_DIR_MARKER).write_text("true-dna generated data\n", encoding="utf-8")
 
 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
+
+
+def clean_ncbi_credential(value: str | None, env_name: str) -> str | None:
+    """Ignore documentation placeholders before spawning NCBI CLI processes."""
+    cleaned = str(value or "").strip()
+    if not cleaned or cleaned.casefold() in EXAMPLE_CREDENTIAL_VALUES:
+        if os.getenv(env_name, "").strip().casefold() in EXAMPLE_CREDENTIAL_VALUES:
+            os.environ.pop(env_name, None)
+        return None
+    return cleaned
 
 
 def validate_csv_header(csv_path: Path) -> None:
@@ -171,6 +191,7 @@ def qc_domain_dir(domain_dir: Path, domain: str, n_threshold: float) -> bool:
         str(n_threshold),
         "--min_entropy",
         str(min_entropy),
+        "--dedupe",
         "--fasta",
         *[str(p) for p in raws],
         "--json",
@@ -278,8 +299,11 @@ def pipeline_for_csv(
     max_n_frac: float,
     max_assemblies: int,
     overshoot_mb: int,
+    domain_budget_mb: float | None,
     parallel_downloads: int,
-    refseq_only: bool,
+    scratch_dir: Path | None,
+    assembly_source: str,
+    exclude_plasmids: bool,
     fuzzy: bool,
     api_key: str | None,
     email: str | None,
@@ -320,20 +344,26 @@ def pipeline_for_csv(
         str(max_assemblies),
         "--parallel-downloads",
         str(parallel_downloads),
+        "--assembly-source",
+        assembly_source,
         "--run-qc",
         "--qc-n-threshold",
         "0.0",
         "--results-dir",
         str(domain_dir),
     ]
+    if domain_budget_mb is not None:
+        cmd.extend(["--domain-budget-mb", str(domain_budget_mb)])
+    if scratch_dir is not None:
+        cmd.extend(["--out-dir", str(scratch_dir / domain)])
 
-    if refseq_only:
-        cmd.append("--refseq-only")
+    if exclude_plasmids:
+        cmd.append("--exclude-plasmids")
     if fuzzy:
         cmd.append("--fuzzy")
     child_env = os.environ.copy()
     if api_key:
-        child_env["NCBI_DATASETS_API_KEY"] = api_key
+        child_env["NCBI_API_KEY"] = api_key
     if email:
         child_env["NCBI_TAXONOMY_EMAIL"] = email
 
@@ -368,6 +398,10 @@ def pipeline_for_csv(
             raise SystemExit(f"Concatenation failed for {domain}")
         return False
 
+    if domain_budget_mb is not None and out_fa.stat().st_size > int(round(domain_budget_mb * 1_000_000)):
+        print(f"[error] {out_fa.name} exceeds its {domain_budget_mb:.1f} MB hard storage budget")
+        return False
+
     # Final verification
     print("\n[verify] Checking output quality...")
     verify_success, verify_msg = verify_output_quality(out_fa, domain)
@@ -398,19 +432,43 @@ def main():
     ap.add_argument(
         "--max-assemblies",
         type=int,
-        default=20000,
-        help="Upper bound on assemblies to consider per species (default: 20000)",
+        default=1000,
+        help="Upper bound on assemblies to consider per species (default: 1000)",
     )
     ap.add_argument(
-        "--overshoot-mb", type=int, default=10, help="Extra Mb allowed past each species target (default: 10)"
+        "--overshoot-mb", type=int, default=0, help="Extra MB allowed past a per-species target (default: 0)"
     )
-    ap.add_argument("--parallel-downloads", type=int, default=4, help="Parallel assembly downloads per species")
-    ap.add_argument("--refseq-only", action="store_true", help="Restrict to RefSeq assemblies only")
+    ap.add_argument(
+        "--domain-budget-mb",
+        type=float,
+        default=None,
+        help="Hard storage budget shared by every species in each CSV/domain.",
+    )
+    ap.add_argument(
+        "--parallel-downloads",
+        type=int,
+        default=4,
+        help="Bounded concurrent package downloads; output ordering remains deterministic (default: 4)",
+    )
+    ap.add_argument(
+        "--scratch-dir",
+        type=Path,
+        default=Path(os.getenv("TRUE_DNA_NCBI_SCRATCH", Path.home() / ".cache" / "true_dna_ncbi")),
+        help="Temporary NCBI package storage; native WSL storage is recommended.",
+    )
+    ap.add_argument(
+        "--assembly-source",
+        choices=["all", "RefSeq", "GenBank"],
+        default="all",
+        help="Assembly source forwarded to fetch_genomes.py.",
+    )
+    ap.add_argument("--refseq-only", action="store_true", help="Compatibility alias for --assembly-source RefSeq")
+    ap.add_argument("--exclude-plasmids", action="store_true", help="Discard contigs labelled as plasmids before QC")
     ap.add_argument("--no-fuzzy", dest="fuzzy", action="store_false", help="Disable fuzzy taxonomy matching")
     ap.add_argument(
         "--api-key",
         default=None,
-        help="NCBI API key (prefer the NCBI_DATASETS_API_KEY environment variable to avoid shell history)",
+        help="NCBI API key (prefer the NCBI_API_KEY environment variable to avoid shell history)",
     )
     ap.add_argument("--email", default=None, help="Contact email for NCBI taxonomy")
     ap.add_argument(
@@ -418,12 +476,24 @@ def main():
     )
     args = ap.parse_args()
 
+    if args.refseq_only and args.assembly_source == "GenBank":
+        ap.error("--refseq-only conflicts with --assembly-source GenBank")
+    if args.refseq_only:
+        args.assembly_source = "RefSeq"
+    if args.domain_budget_mb is not None and args.domain_budget_mb <= 0:
+        ap.error("--domain-budget-mb must be positive")
+
     out_root = (REPO_ROOT / args.out_root).resolve()
     DOMAIN_FASTAS_DIR.mkdir(parents=True, exist_ok=True)
+    scratch_dir = args.scratch_dir.expanduser().resolve()
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[scratch] Temporary NCBI packages: {scratch_dir}")
 
     # Resolve API/email fallbacks from env if not given
-    api_key = args.api_key or os.getenv("NCBI_DATASETS_API_KEY")
-    email = args.email or os.getenv("NCBI_TAXONOMY_EMAIL")
+    api_key = clean_ncbi_credential(
+        args.api_key or os.getenv("NCBI_API_KEY") or os.getenv("NCBI_DATASETS_API_KEY"), "NCBI_API_KEY"
+    )
+    email = clean_ncbi_credential(args.email or os.getenv("NCBI_TAXONOMY_EMAIL"), "NCBI_TAXONOMY_EMAIL")
 
     # Basic checks for required helper scripts
     for p in (FETCH, SEQ_QC, PRINT_QC):
@@ -453,8 +523,11 @@ def main():
             max_n_frac=args.max_n_frac,
             max_assemblies=args.max_assemblies,
             overshoot_mb=args.overshoot_mb,
+            domain_budget_mb=args.domain_budget_mb,
             parallel_downloads=args.parallel_downloads,
-            refseq_only=args.refseq_only,
+            scratch_dir=scratch_dir,
+            assembly_source=args.assembly_source,
+            exclude_plasmids=args.exclude_plasmids,
             fuzzy=args.fuzzy,
             api_key=api_key,
             email=email,

@@ -15,7 +15,7 @@ import sys
 import time
 import zipfile
 from collections.abc import Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
 
@@ -41,6 +41,18 @@ except ImportError:
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 WRITE_LOCK = Lock()
+EXAMPLE_CREDENTIAL_VALUES = {"paste-your-ncbi-key-here", "your-email@example.com"}
+
+
+def clean_ncbi_credential(value: str | None, env_name: str) -> str | None:
+    """Ignore copied documentation placeholders and remove them from children."""
+    cleaned = str(value or "").strip()
+    if not cleaned or cleaned.casefold() in EXAMPLE_CREDENTIAL_VALUES:
+        if os.getenv(env_name, "").strip().casefold() in EXAMPLE_CREDENTIAL_VALUES:
+            os.environ.pop(env_name, None)
+        return None
+    return cleaned
+
 
 # Subprocess execution
 
@@ -277,10 +289,85 @@ def sanitize_name(name: str) -> str:
     return re.sub(r"_+", "_", safe).strip("_")
 
 
-def list_taxon_assemblies(tax_id: str, levels_csv: str, refseq_only: bool, max_rows: int) -> list[dict]:
+def parse_assembly_summary_record(obj: Mapping[str, object], assembly_source: str) -> dict | None:
+    """Normalize one current NCBI Datasets assembly-summary record."""
+    if assembly_source not in {"all", "RefSeq", "GenBank"}:
+        raise ValueError(f"Unsupported assembly source: {assembly_source!r}")
+
+    assembly_info = obj.get("assembly_info", {}) or obj.get("assembly", {}) or {}
+    assembly_stats = obj.get("assembly_stats", {}) or {}
+    if not isinstance(assembly_info, Mapping) or not isinstance(assembly_stats, Mapping):
+        return None
+    organism = obj.get("organism", {}) or {}
+    if not isinstance(organism, Mapping):
+        organism = {}
+
+    acc = obj.get("accession") or assembly_info.get("accession") or obj.get("assembly_accession")
+    level = obj.get("assembly_level") or assembly_info.get("assembly_level")
+    name = (
+        assembly_info.get("assembly_name")
+        or assembly_info.get("display_name")
+        or obj.get("assembly_name")
+        or organism.get("organism_name")
+    )
+    refcat = obj.get("refseq_category") or assembly_info.get("refseq_category")
+    size = (
+        obj.get("total_length")
+        or assembly_info.get("sequence_length")
+        or assembly_stats.get("total_sequence_length")
+        or obj.get("sequence_length")
+        or 0
+    )
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        size = 0
+
+    if not acc:
+        return None
+    accession = str(acc)
+    is_refseq = accession.startswith("GCF_") or str(obj.get("source_database") or "").endswith("REFSEQ") or bool(refcat)
+    is_genbank = accession.startswith("GCA_")
+    if assembly_source == "RefSeq" and not is_refseq:
+        return None
+    if assembly_source == "GenBank" and not is_genbank:
+        return None
+
+    return {
+        "accession": accession,
+        "assembly_level": level,
+        "assembly_name": name,
+        "refseq_category": refcat,
+        "total_length": size,
+        "source": "RefSeq" if is_refseq else "GenBank" if is_genbank else "unknown",
+    }
+
+
+def parse_assembly_summary_lines(output: str, assembly_source: str) -> list[dict]:
+    """Parse line-delimited JSON emitted by `datasets summary genome`."""
+    records: list[dict] = []
+    for line in (output or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, Mapping):
+            continue
+        record = parse_assembly_summary_record(obj, assembly_source)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def list_taxon_assemblies(tax_id: str, levels_csv: str, assembly_source: str, max_rows: int) -> list[dict]:
     """Use 'datasets summary genome taxon' to enumerate assemblies."""
     if not have_datasets_cli():
         raise SystemExit("NCBI 'datasets' CLI not found on PATH.")
+    if assembly_source not in {"all", "RefSeq", "GenBank"}:
+        raise ValueError(f"Unsupported assembly source: {assembly_source!r}")
 
     cmd = [
         "datasets",
@@ -302,51 +389,27 @@ def list_taxon_assemblies(tax_id: str, levels_csv: str, refseq_only: bool, max_r
             raise RuntimeError(f"No genome data available for TaxID {tax_id}")
         raise RuntimeError(f"'datasets summary' failed for TaxID {tax_id}: {err.strip()}")
 
-    recs: list[dict] = []
-    for line in (out or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    return parse_assembly_summary_lines(out, assembly_source)
 
-        acc = obj.get("accession") or obj.get("assembly", {}).get("accession") or obj.get("assembly_accession")
-        level = obj.get("assembly_level") or obj.get("assembly", {}).get("assembly_level")
-        name = (
-            (obj.get("organism", {}) or {}).get("organism_name")
-            or (obj.get("assembly", {}) or {}).get("display_name")
-            or obj.get("assembly_name")
-        )
-        refcat = obj.get("refseq_category") or (obj.get("assembly", {}) or {}).get("refseq_category")
-        size = (
-            obj.get("total_length")
-            or (obj.get("assembly", {}) or {}).get("sequence_length")
-            or obj.get("sequence_length")
-            or 0
-        )
-        try:
-            size = int(size)
-        except Exception:
-            size = 0
 
-        if not acc:
-            continue
+def get_assembly_by_accession(accession: str, assembly_source: str) -> dict:
+    """Resolve an explicit, versioned assembly accession through NCBI Datasets."""
+    if not have_datasets_cli():
+        raise SystemExit("NCBI 'datasets' CLI not found on PATH.")
+    if not re.fullmatch(r"GC[AF]_\d+\.\d+", accession):
+        raise ValueError(f"Invalid versioned assembly accession: {accession!r}")
 
-        if refseq_only and not (str(acc).startswith("GCF_") or refcat):
-            continue
+    code, out, err = _run(["datasets", "summary", "genome", "accession", accession, "--as-json-lines"])
+    if code != 0:
+        raise RuntimeError(f"'datasets summary genome accession' failed for {accession}: {err.strip()}")
 
-        recs.append(
-            {
-                "accession": acc,
-                "assembly_level": level,
-                "assembly_name": name,
-                "refseq_category": refcat,
-                "total_length": size,
-            }
-        )
-    return recs
+    records = parse_assembly_summary_lines(out, assembly_source)
+    for record in records:
+        if record["accession"] == accession:
+            return record
+    if assembly_source == "GenBank" and accession.startswith("GCF_"):
+        raise RuntimeError(f"Pinned RefSeq accession {accession} conflicts with --assembly-source GenBank")
+    raise RuntimeError(f"NCBI returned no {assembly_source} assembly record for pinned accession {accession}")
 
 
 def sort_assemblies(assemblies: list[dict], level_priority: list[str]) -> list[dict]:
@@ -359,6 +422,7 @@ def sort_assemblies(assemblies: list[dict], level_priority: list[str]) -> list[d
             prio.get(lvl, len(prio) + 1),
             0 if (a.get("refseq_category") or "").lower() else 1,
             -int(a.get("total_length") or 0),
+            str(a.get("accession") or ""),
         )
 
     return sorted(assemblies, key=key)
@@ -434,6 +498,76 @@ def download_and_prepare(accession: str, dest_root: Path, retries: int = 2) -> P
     raise RuntimeError(last_err or f"failed to download {accession}")
 
 
+def download_assembly_worker(assembly: dict, dest_root: Path) -> tuple[dict, Path | None, str | None]:
+    """Download one package without changing corpus state.
+
+    Filtering and FASTA appends deliberately happen in the main thread.  That
+    makes a parallel fetch schedule produce the same output as a serial run.
+    """
+    try:
+        return assembly, download_and_prepare(assembly["accession"], dest_root), None
+    except Exception as exc:
+        return assembly, None, str(exc)
+
+
+def discard_download_package(package_dir: Path | None, keep_downloads: bool) -> None:
+    """Remove a consumed NCBI package unless the caller explicitly keeps it for debugging."""
+    if keep_downloads or package_dir is None or not package_dir.exists():
+        return
+    parent = package_dir.parent
+    shutil.rmtree(package_dir, ignore_errors=True)
+    try:
+        parent.rmdir()  # Remove the now-empty per-species cache directory too.
+    except OSError:
+        pass
+
+
+def ordered_prefetched_downloads(
+    assemblies: list[dict], dest_root: Path, workers: int, keep_downloads: bool
+) -> Iterable[tuple[dict, Path | None, str | None]]:
+    """Yield packages in accession-selection order while downloading a small window in parallel."""
+    if workers <= 1:
+        for assembly in assemblies:
+            yield download_assembly_worker(assembly, dest_root)
+        return
+
+    pending: dict[int, object] = {}
+    next_index = 0
+    executor = ThreadPoolExecutor(max_workers=workers)
+
+    def submit(index: int) -> None:
+        pending[index] = executor.submit(download_assembly_worker, assemblies[index], dest_root)
+
+    try:
+        while next_index < min(workers, len(assemblies)):
+            submit(next_index)
+            next_index += 1
+
+        for expected_index in range(len(assemblies)):
+            future = pending.pop(expected_index)
+            assembly, package_dir, error = future.result()
+            if next_index < len(assemblies):
+                submit(next_index)
+                next_index += 1
+            yield assembly, package_dir, error
+    finally:
+        # A quota may be met before the prefetch window is consumed.  Cancel
+        # queued work, wait for the bounded in-flight window, then remove any
+        # unconsumed temporary packages.
+        for future in pending.values():
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        if not keep_downloads:
+            for future in pending.values():
+                if future.cancelled() or not future.done():
+                    continue
+                try:
+                    _assembly, package_dir, _error = future.result()
+                except Exception:
+                    continue
+                discard_download_package(package_dir, keep_downloads)
+
+
 def fasta_iter(path: Path) -> Iterable[tuple[str, str]]:
     """Yield (header, seq) tuples from a fasta/fastn file."""
     header = None
@@ -462,15 +596,30 @@ def contig_passes_filters(header: str, seq: str, min_length: int, max_n_frac: fl
     if max_n_frac < 0:
         return True
 
+    # A zero threshold means "emit no N bases", not "discard every source
+    # contig that contains an N".  ``iter_filtered_contigs`` below splits at
+    # every N and only emits A/C/G/T chunks, so accepting the source contig in
+    # this case preserves the strict output guarantee.  This matters for
+    # otherwise high-quality complete genomes that have a handful of gap
+    # symbols (for example, seven Ns in an approximately 1.8 Mb chromosome).
+    if max_n_frac == 0:
+        return True
+
     n_frac = seq.count("N") / float(len(seq))
     if n_frac > max_n_frac:
         return False
     return True
 
 
-STRICT_SPLIT_RE = re.compile(r"N+")
-STRICT_BASES = frozenset("ACGTN")
+# Split, rather than discard, a contig at every ambiguity/gap symbol.  Every
+# emitted sequence is therefore strictly A/C/G/T even when a public assembly
+# uses IUPAC ambiguity letters in an otherwise high-quality chromosome.
+STRICT_SPLIT_RE = re.compile(r"[^ACGT]+")
 MAX_LINEAR_CONTIG_CHUNK = 10_000_000
+# A FASTA header plus the configured minimum sequence must fit before another
+# assembly is considered.  Without this guard a nearly-full byte budget can
+# scan every remaining assembly trying to fill an impossible final few bytes.
+MIN_FASTA_RECORD_HEADROOM = 4_096
 
 
 def iter_filtered_contigs(
@@ -490,8 +639,6 @@ def iter_filtered_contigs(
         for fna in data_dir.rglob(ext):
             for h, s in fasta_iter(fna):
                 s = s.upper()
-                if set(s) - STRICT_BASES:
-                    continue
                 if not contig_passes_filters(h, s, min_length, max_n_frac, exclude_plasmids):
                     continue
                 clean_chunks = STRICT_SPLIT_RE.split(s)
@@ -519,6 +666,59 @@ def canonical_sequence_hash(sequence: str) -> bytes:
     return hashlib.sha256(canonical.encode("ascii")).digest()
 
 
+def sha256_file(path: Path, chunk_size: int = 16 * 1024 * 1024) -> str:
+    """Return a streaming SHA-256 digest without retaining an assembly in RAM."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def assembly_file_inventory(pkg_dir: Path, accession: str) -> list[dict[str, object]]:
+    """Record the exact public genome files selected from one NCBI package."""
+    data_dir = pkg_dir / "ncbi_dataset" / "data"
+    files = sorted(path for pattern in ("*.fna", "*.fa", "*.fasta") for path in data_dir.rglob(pattern))
+    return [
+        {
+            "path": str(path.relative_to(pkg_dir)),
+            "bytes": path.stat().st_size,
+            "sha256": sha256_file(path),
+            "source_url": f"https://www.ncbi.nlm.nih.gov/datasets/genome/{accession}/",
+            "source": "NCBI Datasets genome package",
+        }
+        for path in files
+    ]
+
+
+def _fragment_to_fit(
+    header: str,
+    sequence: str,
+    available_record_bytes: int,
+    *,
+    min_length: int,
+    seed: int,
+) -> tuple[str, str] | None:
+    """Return a deterministic interval whose complete FASTA record fits the cap."""
+    full_record_bytes = len(header.encode("utf-8")) + len(sequence) + 3
+    if full_record_bytes <= available_record_bytes:
+        return header, sequence
+
+    # Reserve enough room for the coordinate label before choosing an interval.
+    label_prefix = f"{header}|sampled="
+    max_sequence_bytes = available_record_bytes - len(label_prefix.encode("utf-8")) - 3 - 30
+    if max_sequence_bytes < min_length:
+        return None
+    take = min(len(sequence), max_sequence_bytes)
+    if take < len(sequence):
+        span = len(sequence) - take + 1
+        offset = int.from_bytes(hashlib.sha256(f"{seed}|{header}|{len(sequence)}".encode()).digest()[:8], "big") % span
+        end = offset + take
+        sampled_header = f"{header}|sampled={offset}:{end}"
+        return sampled_header, sequence[offset:end]
+    return header, sequence
+
+
 def append_contigs_to_fasta_with_dedup(
     out_fa: Path,
     contigs: list[tuple[str, str]],
@@ -526,16 +726,33 @@ def append_contigs_to_fasta_with_dedup(
     *,
     current_bases: list[int] | None = None,
     max_total_bases: int | None = None,
+    current_bytes: list[int] | None = None,
+    max_total_bytes: int | None = None,
+    fragment_seed: int = 43,
+    min_length: int = 1000,
 ) -> tuple[int, int, int]:
-    """Append contigs while deduplicating reverse-complement equivalents."""
+    """Append contigs while deduplicating and respecting base and byte caps."""
     bases = 0
     dupes = 0
     written = 0
 
     with WRITE_LOCK:
         existing_bases = current_bases[0] if current_bases is not None else 0
+        existing_bytes = current_bytes[0] if current_bytes is not None else 0
         with open(out_fa, "a", encoding="utf-8") as w:
             for h, s in contigs:
+                if max_total_bytes is not None:
+                    fitted = _fragment_to_fit(
+                        h,
+                        s,
+                        max_total_bytes - existing_bytes,
+                        min_length=min_length,
+                        seed=fragment_seed,
+                    )
+                    if fitted is None:
+                        continue
+                    h, s = fitted
+
                 seq_hash = canonical_sequence_hash(s)
 
                 if seq_hash in seen_hashes:
@@ -544,15 +761,22 @@ def append_contigs_to_fasta_with_dedup(
                 if max_total_bases is not None and existing_bases + len(s) > max_total_bases:
                     continue
 
+                record_bytes = len(h.encode("utf-8")) + len(s) + 3
+                if max_total_bytes is not None and existing_bytes + record_bytes > max_total_bytes:
+                    continue
+
                 seen_hashes.add(seq_hash)
                 w.write(f">{h}\n")
                 w.write(s + "\n")
                 bases += len(s)
                 existing_bases += len(s)
+                existing_bytes += record_bytes
                 written += 1
 
         if current_bases is not None:
             current_bases[0] = existing_bases
+        if current_bytes is not None:
+            current_bytes[0] = existing_bytes
 
     return bases, dupes, written
 
@@ -650,7 +874,9 @@ def process_assembly_worker(args_tuple):
             if len(s) > remaining and (len(s) - remaining) > overshoot_bases:
                 continue
 
-            batch.append((h, s))
+            # Preserve assembly provenance in the final combined FASTA so a
+            # later group-aware split cannot leak related contigs.
+            batch.append((f"assembly={acc}|{h}", s))
             batch_bytes += len(s)
 
             # Flush when batch reaches ~32MB to prevent massive OOM from 256 Eukaryotic chromosomes
@@ -722,17 +948,33 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--target-mb", type=float, default=100.0)
     p.add_argument("--targets-mb", type=float, nargs="+")
 
-    p.add_argument("--out-dir", type=Path, default=Path("data/raw_downloads"))
+    p.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path(os.getenv("TRUE_DNA_NCBI_SCRATCH", "data/raw_downloads")),
+        help="Temporary NCBI package directory; use native WSL storage for best throughput.",
+    )
     p.add_argument("--results-dir", type=Path, default=Path("data/balanced"))
     p.add_argument("--keep-downloads", action="store_true", help="Retain extracted NCBI assembly packages")
 
     p.add_argument("--min-length", type=int, default=1000)
-    p.add_argument("--max-n-frac", type=float, default=0.05)
+    p.add_argument(
+        "--max-n-frac",
+        type=float,
+        default=0.05,
+        help="Maximum source-contig N fraction when positive. At 0, split at Ns and emit only zero-N A/C/G/T chunks.",
+    )
     p.add_argument("--exclude-plasmids", action="store_true")
 
     p.add_argument("--refseq-only", action="store_true")
+    p.add_argument(
+        "--assembly-source",
+        choices=["all", "RefSeq", "GenBank"],
+        default="all",
+        help="Restrict selected accessions by their GCF_ (RefSeq) or GCA_ (GenBank) prefix.",
+    )
     p.add_argument("--levels", type=str, default="complete,chromosome,scaffold")
-    p.add_argument("--max-assemblies", type=int, default=300)
+    p.add_argument("--max-assemblies", type=int, default=1_000)
 
     p.add_argument("--run-qc", action="store_true")
     p.add_argument("--qc-min-length", type=int, default=1000)
@@ -746,10 +988,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--fuzzy", action="store_true")
     p.add_argument("--fuzzy-min-score", type=int, default=85)
     p.add_argument(
+        "--api-key",
         "--taxonomy-api-key",
+        dest="api_key",
         type=str,
-        default=os.getenv("NCBI_DATASETS_API_KEY"),
-        help="NCBI API key; prefer the NCBI_DATASETS_API_KEY environment variable",
+        default=os.getenv("NCBI_API_KEY") or os.getenv("NCBI_DATASETS_API_KEY"),
+        help="NCBI API key; prefer the NCBI_API_KEY environment variable",
     )
     p.add_argument(
         "--taxonomy-email",
@@ -759,18 +1003,55 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument("--append", action="store_true")
-    p.add_argument("--overshoot-mb", type=float, default=2.0)
+    p.add_argument("--overshoot-mb", type=float, default=0.0)
+    p.add_argument(
+        "--domain-budget-mb",
+        type=float,
+        default=None,
+        help="Hard byte budget shared by every species in this config/domain. Enables deterministic quota redistribution.",
+    )
+    p.add_argument("--sampling-seed", type=int, default=43, help="Seed for deterministic final-record truncation")
 
     p.add_argument(
-        "--parallel-downloads", type=int, default=4, help="Number of parallel downloads (default: 4, use 1 to disable)"
+        "--parallel-downloads",
+        type=int,
+        default=4,
+        help="Bounded parallel package downloads; filtering/writing remains deterministic (default: 4)",
     )
 
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 
 
-def load_config(path: Path) -> list[tuple[str, float]]:
-    """Return list of (species, target_mb)."""
+def _config_item(item: Mapping[str, object], default_target_mb: float = 100.0) -> dict[str, object] | None:
+    def optional_text(value: object) -> str | None:
+        text = str(value or "").strip()
+        return None if not text or text.casefold() in {"none", "null"} else text
+
+    tax_id = str(item.get("tax_id") or "").strip()
+    name = str(
+        item.get("species") or item.get("scientific_name") or item.get("name") or item.get("taxon") or ""
+    ).strip()
+    if tax_id and not tax_id.isdecimal():
+        raise ValueError(f"Invalid tax_id {tax_id!r}")
+    if not tax_id and not name:
+        return None
+    target_mb = float(item.get("target_mb") or item.get("weight") or default_target_mb)
+    return {
+        "query": tax_id or name,
+        "tax_id": tax_id or None,
+        "scientific_name": name or None,
+        "target_mb": target_mb,
+        "family_tax_id": str(item.get("family_tax_id") or "") or None,
+        "family_name": str(item.get("family_name") or "") or None,
+        "selection_reason": str(item.get("selection_reason") or "") or None,
+        "preferred_refseq_accession": optional_text(item.get("preferred_refseq_accession")),
+        "domain": str(item.get("domain") or "") or None,
+    }
+
+
+def load_config(path: Path) -> list[dict[str, object]]:
+    """Return TaxID-aware selection records from YAML or CSV."""
     if path.suffix.lower() in {".yaml", ".yml"}:
         try:
             import yaml
@@ -782,26 +1063,22 @@ def load_config(path: Path) -> list[tuple[str, float]]:
         species_items = data.get("species", [])
         if not isinstance(species_items, list):
             raise ValueError("YAML 'species' must be a list")
-        items: list[tuple[str, float]] = []
+        items: list[dict[str, object]] = []
         for item in species_items:
             if not isinstance(item, Mapping):
                 raise ValueError("Each YAML species entry must be a mapping")
-            nm = str(item.get("name") or item.get("taxon") or "").strip()
-            if not nm:
-                continue
-            tgt = float(item.get("target_mb", data.get("target_mb", 100)))
-            items.append((nm, tgt))
+            record = _config_item(item, float(data.get("target_mb", 100)))
+            if record:
+                items.append(record)
         return items
 
-    rows: list[tuple[str, float]] = []
+    rows: list[dict[str, object]] = []
     with open(path, encoding="utf-8") as f:
         rdr = csv.DictReader(f)
         for r in rdr:
-            nm = (r.get("species") or r.get("taxon") or "").strip()
-            if not nm:
-                continue
-            tgt = float(r.get("target_mb") or 100)
-            rows.append((nm, tgt))
+            record = _config_item(r)
+            if record:
+                rows.append(record)
     return rows
 
 
@@ -820,8 +1097,60 @@ def get_processed_taxids(results_dir: Path) -> set[str]:
     return processed_tax_ids
 
 
+def fasta_storage_bytes(path: Path) -> int:
+    return path.stat().st_size if path.exists() else 0
+
+
+def domain_storage_bytes(results_dir: Path) -> int:
+    return sum(fasta_storage_bytes(path) for path in results_dir.glob("*.fa"))
+
+
+def write_domain_download_manifest(results_dir: Path, budget_bytes: int | None, sampling_seed: int) -> None:
+    """Summarize the exact raw files before the domain-level QC/concatenation step."""
+    species = []
+    for manifest_path in sorted(results_dir.glob("*.manifest.json")):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        output = Path(str(manifest.get("output_fasta") or ""))
+        species.append(
+            {
+                "manifest": manifest_path.name,
+                "tax_id": manifest.get("tax_id"),
+                "scientific_name": manifest.get("scientific_name"),
+                "family_tax_id": manifest.get("family_tax_id"),
+                "family_name": manifest.get("family_name"),
+                "selection_reason": manifest.get("selection_reason"),
+                "fasta_bytes": fasta_storage_bytes(output),
+                "fasta_sha256": sha256_file(output) if output.exists() else None,
+                "assemblies_used": manifest.get("assemblies_used", []),
+            }
+        )
+    total_bytes = sum(int(item["fasta_bytes"]) for item in species)
+    payload = {
+        "schema_version": 1,
+        "budget_bytes": budget_bytes,
+        "written_bytes": total_bytes,
+        "within_budget": budget_bytes is None or total_bytes <= budget_bytes,
+        "sampling_seed": sampling_seed,
+        "species": species,
+    }
+    (results_dir / "domain_download_manifest.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def reached_target(written_bases: int, current_bytes: list[int], target_bases: int, byte_cap: int | None) -> bool:
+    return written_bases >= target_bases or (
+        byte_cap is not None and current_bytes[0] >= byte_cap - MIN_FASTA_RECORD_HEADROOM
+    )
+
+
 def main() -> int:
     args = parse_args()
+    args.api_key = clean_ncbi_credential(args.api_key, "NCBI_API_KEY")
+    args.taxonomy_email = clean_ncbi_credential(args.taxonomy_email, "NCBI_TAXONOMY_EMAIL")
     if not 0.0 <= args.max_n_frac <= 1.0:
         raise SystemExit("--max-n-frac must be between 0 and 1")
     if not 0.0 <= args.qc_n_threshold <= 100.0:
@@ -834,8 +1163,22 @@ def main() -> int:
         raise SystemExit("--max-assemblies must be positive")
     if args.overshoot_mb < 0:
         raise SystemExit("--overshoot-mb must be non-negative")
+    if args.domain_budget_mb is not None and args.domain_budget_mb <= 0:
+        raise SystemExit("--domain-budget-mb must be positive")
     if not 0 <= args.fuzzy_min_score <= 100:
         raise SystemExit("--fuzzy-min-score must be between 0 and 100")
+    if args.refseq_only and args.assembly_source == "GenBank":
+        raise SystemExit("--refseq-only conflicts with --assembly-source GenBank")
+    if args.refseq_only:
+        args.assembly_source = "RefSeq"
+    if args.api_key:
+        # The current NCBI Datasets CLI automatically reads this environment
+        # variable for both summary and download requests. It also lets our
+        # E-utilities taxonomy fallback use the same key.
+        os.environ["NCBI_API_KEY"] = args.api_key
+        args.taxonomy_api_key = args.api_key
+    else:
+        args.taxonomy_api_key = None
     print(f"[env] Python: {sys.version.split()[0]}  cwd: {os.getcwd()}")
     print(f"[env] datasets CLI: {shutil.which('datasets') or 'NOT FOUND'}")
     print(f"[env] Parallel downloads: {args.parallel_downloads} workers")
@@ -848,12 +1191,25 @@ def main() -> int:
         targets = args.targets_mb or [args.target_mb] * len(args.species)
         if len(targets) != len(args.species):
             raise SystemExit("--targets-mb must contain one value per --species entry")
-        spec_items = list(zip(args.species, targets, strict=True))
+        spec_items = [
+            {
+                "query": name,
+                "tax_id": name if str(name).strip().isdecimal() else None,
+                "scientific_name": None,
+                "target_mb": float(target),
+                "family_tax_id": None,
+                "family_name": None,
+                "selection_reason": None,
+                "preferred_refseq_accession": None,
+                "domain": None,
+            }
+            for name, target in zip(args.species, targets, strict=True)
+        ]
     else:
         spec_items = load_config(Path(args.config))
     if not spec_items:
         raise SystemExit("No species targets were provided")
-    if any(target <= 0 for _species, target in spec_items):
+    if any(float(item["target_mb"]) <= 0 for item in spec_items):
         raise SystemExit("All target sizes must be positive")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -867,22 +1223,46 @@ def main() -> int:
         if processed_tax_ids:
             print(f"[append] Found {len(processed_tax_ids)} completed. Will skip.")
 
+    domain_budget_bytes = (
+        int(round(float(args.domain_budget_mb) * 1_000_000)) if args.domain_budget_mb is not None else None
+    )
+    if domain_budget_bytes is not None:
+        existing_domain_bytes = domain_storage_bytes(args.results_dir)
+        if existing_domain_bytes > domain_budget_bytes:
+            raise SystemExit(
+                f"Existing files use {existing_domain_bytes / 1e6:.1f} MB, exceeding the "
+                f"{args.domain_budget_mb:.1f} MB domain budget. Use a fresh output directory."
+            )
+        print(
+            f"[budget] shared domain cap: {args.domain_budget_mb:.1f} MB; "
+            f"existing: {existing_domain_bytes / 1e6:.1f} MB"
+        )
+
     if HAS_TQDM:
         species_iter = tqdm(spec_items, desc="Processing species", unit="species")
     else:
         species_iter = spec_items
 
     failures = 0
-    for raw_name, target_mb in species_iter:
+    for item_index, item in enumerate(species_iter):
+        raw_name = str(item["query"])
+        configured_tax_id = str(item["tax_id"] or "")
+        configured_name = str(item["scientific_name"] or "")
+        configured_target_mb = float(item["target_mb"])
+        preferred_refseq_accession = str(item.get("preferred_refseq_accession") or "")
         try:
+            if domain_budget_bytes is not None and domain_storage_bytes(args.results_dir) >= domain_budget_bytes:
+                print("[budget] shared domain cap reached; remaining species are not downloaded")
+                break
             try:
-                tax_id, canonical = resolve_species_to_taxid(raw_name, args)
+                if configured_tax_id:
+                    tax_id = configured_tax_id
+                    canonical = configured_name or configured_tax_id
+                else:
+                    tax_id, canonical = resolve_species_to_taxid(raw_name, args)
             except Exception as e:
                 print(f"[taxonomy:error] Failed to resolve '{raw_name}': {e}")
                 failures += 1
-                continue
-
-            if args.append and tax_id in processed_tax_ids:
                 continue
 
             safe_name = sanitize_name(canonical)
@@ -890,11 +1270,27 @@ def main() -> int:
             out_fasta = args.results_dir / f"{safe_name}.fa"
             manifest_path = args.results_dir / f"{safe_name}.manifest.json"
 
-            target_bases = int(round(float(target_mb) * 1_000_000))
+            remaining_weight = sum(float(rest["target_mb"]) for rest in spec_items[item_index:])
+            current_domain_bytes = domain_storage_bytes(args.results_dir)
+            if domain_budget_bytes is not None:
+                domain_remaining_bytes = max(domain_budget_bytes - current_domain_bytes, 0)
+                target_storage_bytes = int(round(domain_remaining_bytes * configured_target_mb / remaining_weight))
+                target_mb = target_storage_bytes / 1_000_000.0
+            else:
+                target_storage_bytes = None
+                target_mb = configured_target_mb
+            target_bases = int(round(target_mb * 1_000_000))
             overshoot_bases = int(round(float(args.overshoot_mb) * 1_000_000))
 
+            pinned_assembly = None
+            if preferred_refseq_accession:
+                pinned_assembly = get_assembly_by_accession(preferred_refseq_accession, args.assembly_source)
+                print(f"[pin] {canonical}: using audited RefSeq accession {preferred_refseq_accession}")
+
             if args.dry_run:
-                asms = list_taxon_assemblies(tax_id, args.levels, args.refseq_only, 10)
+                asms = list_taxon_assemblies(tax_id, args.levels, args.assembly_source, 10)
+                if pinned_assembly is not None:
+                    asms = [pinned_assembly] + [asm for asm in asms if asm["accession"] != pinned_assembly["accession"]]
                 print(f"[dry-run] {canonical}: showing up to 5 assemblies:")
                 for a in asms[:5]:
                     print(f"  - {a['accession']} | {a.get('assembly_level')} | {a.get('total_length')} bp")
@@ -902,13 +1298,15 @@ def main() -> int:
 
             # Append logic
             written_bases = 0
+            current_bytes = [fasta_storage_bytes(out_fasta) if args.append else 0]
+            byte_cap = target_storage_bytes
             processed_accessions = set()
             seen_hashes = set()
             duplicates_found = 0
 
             if args.append and out_fasta.exists():
                 already = measure_existing_bases(out_fasta)
-                if already >= target_bases:
+                if tax_id in processed_tax_ids and reached_target(already, current_bytes, target_bases, byte_cap):
                     print(f"[append] {out_fasta.name} already has {already / 1e6:.2f} Mb; nothing to do")
                     processed_tax_ids.add(tax_id)
                     continue
@@ -936,16 +1334,27 @@ def main() -> int:
                 if manifest_path.exists():
                     manifest_path.unlink()
 
-            print(f"[plan] {canonical} (TaxID {tax_id}): target about {target_mb:.1f} Mb")
+            print(f"[plan] {canonical} (TaxID {tax_id}): target about {target_mb:.1f} MB")
 
-            assemblies = list_taxon_assemblies(tax_id, args.levels, args.refseq_only, args.max_assemblies)
+            assemblies = list_taxon_assemblies(tax_id, args.levels, args.assembly_source, args.max_assemblies)
+            if pinned_assembly is not None:
+                # NCBI sometimes indexes a reference below a strain TaxID, so
+                # the parent species query can be empty.  Keep the explicit,
+                # audited accession first, then retain any non-duplicate
+                # assemblies returned for the selected parent species.
+                assemblies = [pinned_assembly] + [
+                    asm for asm in assemblies if asm["accession"] != pinned_assembly["accession"]
+                ]
 
             if not assemblies:
                 print(f"[warn] No assemblies found for {canonical}")
                 failures += 1
                 continue
 
-            assemblies = sort_assemblies(assemblies, level_pref)
+            if pinned_assembly is not None:
+                assemblies = [pinned_assembly] + sort_assemblies(assemblies[1:], level_pref)
+            else:
+                assemblies = sort_assemblies(assemblies, level_pref)
 
             original_assembly_count = len(assemblies)
             if processed_accessions:
@@ -962,140 +1371,103 @@ def main() -> int:
             used_contigs = 0
 
             current_bases = [written_bases]
-
             if args.parallel_downloads > 1:
-                print(f"[parallel] Using {args.parallel_downloads} workers")
+                print(
+                    f"[parallel] Prefetching up to {args.parallel_downloads} assemblies; writing in deterministic order"
+                )
+            prefetch_iter = ordered_prefetched_downloads(
+                assemblies,
+                per_species_root,
+                args.parallel_downloads,
+                args.keep_downloads,
+            )
+            download_iter = prefetch_iter
+            if HAS_TQDM:
+                download_iter = tqdm(
+                    download_iter, total=len(assemblies), desc=f"Fetching {canonical}", unit="asm", leave=False
+                )
 
-                work_items = []
-                for asm in assemblies:
-                    if current_bases[0] >= target_bases:
+            for asm, pkg_dir, download_error in download_iter:
+                if reached_target(written_bases, current_bytes, target_bases, byte_cap):
+                    # The item just yielded may be an unconsumed prefetched
+                    # package.  Delete it before closing the iterator, whose
+                    # finalizer handles the remaining pending window.
+                    discard_download_package(pkg_dir, args.keep_downloads)
+                    prefetch_iter.close()
+                    break
+                acc = asm["accession"]
+                if acc in processed_accessions:
+                    discard_download_package(pkg_dir, args.keep_downloads)
+                    continue
+                if download_error or pkg_dir is None:
+                    print(f"[warn] skip {acc}: {download_error or 'download did not yield a package'}")
+                    continue
+
+                batch: list[tuple[str, str]] = []
+                batch_bytes = 0
+                assembly_bases_added = 0
+                for h, s in iter_filtered_contigs(pkg_dir, args.min_length, args.max_n_frac, args.exclude_plasmids):
+                    if reached_target(written_bases, current_bytes, target_bases, byte_cap):
                         break
-                    work_item = (
-                        asm,
-                        per_species_root,
-                        out_fasta,
-                        seen_hashes,
-                        args.min_length,
-                        args.max_n_frac,
-                        args.exclude_plasmids,
-                        overshoot_bases,
-                        current_bases,
-                        target_bases,
-                        args.keep_downloads,
-                    )
-                    work_items.append(work_item)
+                    batch.append((f"assembly={acc}|{h}", s))
+                    batch_bytes += len(s)
 
-                with ThreadPoolExecutor(max_workers=args.parallel_downloads) as executor:
-                    futures = [executor.submit(process_assembly_worker, item) for item in work_items]
-                    completed = as_completed(futures)
-                    if HAS_TQDM:
-                        completed = tqdm(
-                            completed,
-                            total=len(futures),
-                            desc=f"Fetching {canonical}",
-                            unit="asm",
-                            leave=False,
-                        )
-
-                    cancellation_requested = False
-                    for future in completed:
-                        if future.cancelled():
-                            continue
-                        result = future.result()
-                        if result:
-                            _bases_added, dupes, contigs, acc_info = result
-                            duplicates_found += dupes
-                            used_contigs += contigs
-                            chosen_accessions.append(acc_info)
-                            if not HAS_TQDM:
-                                print(f"[progress] {canonical}: {current_bases[0] / 1e6:.1f} / {target_mb:.1f} Mb")
-
-                        if current_bases[0] >= target_bases and not cancellation_requested:
-                            for pending in futures:
-                                pending.cancel()
-                            cancellation_requested = True
-
-                written_bases = current_bases[0]
-
-            else:
-                if HAS_TQDM:
-                    asm_iter = tqdm(assemblies, desc=f"Fetching {canonical}", unit="asm", leave=False)
-                else:
-                    asm_iter = assemblies
-
-                for asm in asm_iter:
-                    if written_bases >= target_bases:
-                        break
-                    acc = asm["accession"]
-                    if acc in processed_accessions:
-                        continue
-
-                    try:
-                        pkg_dir = download_and_prepare(acc, per_species_root)
-                    except Exception as e:
-                        print(f"[warn] skip {acc}: {e}")
-                        continue
-
-                    batch: list[tuple[str, str]] = []
-                    batch_bytes = 0
-                    assembly_bases_added = 0
-                    for h, s in iter_filtered_contigs(pkg_dir, args.min_length, args.max_n_frac, args.exclude_plasmids):
-                        remaining = target_bases - written_bases
-                        if remaining <= 0:
-                            break
-                        if len(s) > remaining and (len(s) - remaining) > overshoot_bases:
-                            continue
-                        batch.append((h, s))
-                        batch_bytes += len(s)
-
-                        # Flush based on memory footprint instead of item count
-                        if batch_bytes >= 32 * 1024 * 1024:
-                            bases_added, dupes, written_count = append_contigs_to_fasta_with_dedup(
-                                out_fasta,
-                                batch,
-                                seen_hashes,
-                                current_bases=current_bases,
-                                max_total_bases=target_bases + overshoot_bases,
-                            )
-                            written_bases = current_bases[0]
-                            assembly_bases_added += bases_added
-                            duplicates_found += dupes
-                            used_contigs += written_count
-                            batch = []
-                            batch_bytes = 0
-                            if not HAS_TQDM:
-                                print(f"[progress] {canonical}: {written_bases / 1e6:.1f} / {target_mb:.1f} Mb")
-                            if written_bases >= target_bases + overshoot_bases:
-                                break
-
-                    if batch and written_bases < target_bases + overshoot_bases:
+                    # Flush based on memory footprint instead of item count.
+                    if batch_bytes >= 32 * 1024 * 1024:
                         bases_added, dupes, written_count = append_contigs_to_fasta_with_dedup(
                             out_fasta,
                             batch,
                             seen_hashes,
                             current_bases=current_bases,
                             max_total_bases=target_bases + overshoot_bases,
+                            current_bytes=current_bytes,
+                            max_total_bytes=byte_cap,
+                            fragment_seed=args.sampling_seed,
+                            min_length=args.min_length,
                         )
                         written_bases = current_bases[0]
                         assembly_bases_added += bases_added
                         duplicates_found += dupes
                         used_contigs += written_count
-                        if not HAS_TQDM:
-                            print(f"[progress] {canonical}: {written_bases / 1e6:.1f} / {target_mb:.1f} Mb")
+                        batch = []
+                        batch_bytes = 0
+                        if reached_target(written_bases, current_bytes, target_bases + overshoot_bases, byte_cap):
+                            break
 
-                    if assembly_bases_added > 0:
-                        processed_accessions.add(acc)
-                        chosen_accessions.append(
-                            {
-                                "accession": acc,
-                                "assembly_level": asm.get("assembly_level"),
-                                "refseq_category": asm.get("refseq_category"),
-                                "assembly_name": asm.get("assembly_name"),
-                            }
-                        )
+                if batch and not reached_target(written_bases, current_bytes, target_bases + overshoot_bases, byte_cap):
+                    bases_added, dupes, written_count = append_contigs_to_fasta_with_dedup(
+                        out_fasta,
+                        batch,
+                        seen_hashes,
+                        current_bases=current_bases,
+                        max_total_bases=target_bases + overshoot_bases,
+                        current_bytes=current_bytes,
+                        max_total_bytes=byte_cap,
+                        fragment_seed=args.sampling_seed,
+                        min_length=args.min_length,
+                    )
+                    written_bases = current_bases[0]
+                    assembly_bases_added += bases_added
+                    duplicates_found += dupes
+                    used_contigs += written_count
 
-                    if not args.keep_downloads and pkg_dir.exists():
-                        shutil.rmtree(pkg_dir, ignore_errors=True)
+                if assembly_bases_added > 0:
+                    processed_accessions.add(acc)
+                    chosen_accessions.append(
+                        {
+                            "accession": acc,
+                            "assembly_level": asm.get("assembly_level"),
+                            "refseq_category": asm.get("refseq_category"),
+                            "assembly_name": asm.get("assembly_name"),
+                            "assembly_total_bases": asm.get("total_length"),
+                            "source": asm.get("source"),
+                            "source_url": f"https://www.ncbi.nlm.nih.gov/datasets/genome/{acc}/",
+                            "genome_files": assembly_file_inventory(pkg_dir, acc),
+                        }
+                    )
+
+                discard_download_package(pkg_dir, args.keep_downloads)
+            prefetch_iter.close()
 
             if written_bases == 0:
                 print(f"[error] Wrote 0 bases for {canonical}")
@@ -1116,9 +1488,17 @@ def main() -> int:
             manifest = {
                 "scientific_name": canonical,
                 "tax_id": tax_id,
+                "domain": item.get("domain"),
+                "family_tax_id": item.get("family_tax_id"),
+                "family_name": item.get("family_name"),
+                "selection_reason": item.get("selection_reason"),
+                "preferred_refseq_accession": item.get("preferred_refseq_accession"),
                 "target_mb": float(target_mb),
+                "storage_budget_bytes": byte_cap,
                 "written_bases": int(written_bases),
                 "written_mb": float(written_bases) / 1_000_000.0,
+                "output_bytes": fasta_storage_bytes(out_fasta),
+                "output_sha256": sha256_file(out_fasta),
                 "num_contigs": int(used_contigs),
                 "duplicates_found": int(duplicates_found),
                 "unique_sequences": len(seen_hashes),
@@ -1129,9 +1509,12 @@ def main() -> int:
                     "max_n_frac": args.max_n_frac,
                     "exclude_plasmids": bool(args.exclude_plasmids),
                     "levels": args.levels,
-                    "refseq_only": bool(args.refseq_only),
+                    "assembly_source": args.assembly_source,
+                    "refseq_only": bool(args.assembly_source == "RefSeq"),
                     "append": bool(args.append),
                     "overshoot_mb": float(args.overshoot_mb),
+                    "domain_budget_mb": args.domain_budget_mb,
+                    "sampling_seed": args.sampling_seed,
                     "deduplicated": True,
                     "parallel_downloads": args.parallel_downloads,
                     "keep_downloads": bool(args.keep_downloads),
@@ -1153,12 +1536,14 @@ def main() -> int:
         except Exception as exc:
             failures += 1
             print(f"[error] Failed processing {raw_name}: {exc}")
-            if not args.keep_downloads and "pkg_dir" in locals() and pkg_dir.exists():
+            if not args.keep_downloads and isinstance(locals().get("pkg_dir"), Path) and pkg_dir.exists():
                 shutil.rmtree(pkg_dir, ignore_errors=True)
             import traceback
 
             traceback.print_exc()
 
+    if domain_budget_bytes is not None:
+        write_domain_download_manifest(args.results_dir, domain_budget_bytes, args.sampling_seed)
     return 1 if failures else 0
 
 

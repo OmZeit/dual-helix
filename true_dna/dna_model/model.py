@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .backbones import DualHelixBackbone, FSHMEncoder
+from .backbones import BiMambaBackbone, DualHelixBackbone, FSHMEncoder, TransformerBackbone
 from .backbones.common import ResBlock1d, RMSNorm, RMSNorm1d, SamePadConv1d
 from .config import IGNORE_INDEX, KMER_PAD_ID, DnaConfig
 
@@ -58,6 +58,20 @@ class DnaModel(nn.Module):
             self.expand = nn.Identity()
             self.unet_fusion = nn.Identity()
             self.high_level_encoder = DualHelixBackbone(config)
+
+        elif self.config.backbone == "bimamba":
+            LOGGER.info("[DnaModel] Initializing full-resolution BiMambaBackbone")
+            self.compress = nn.Identity()
+            self.expand = nn.Identity()
+            self.unet_fusion = nn.Identity()
+            self.high_level_encoder = BiMambaBackbone(config)
+
+        elif self.config.backbone == "transformer":
+            LOGGER.info("[DnaModel] Initializing full-resolution TransformerBackbone")
+            self.compress = nn.Identity()
+            self.expand = nn.Identity()
+            self.unet_fusion = nn.Identity()
+            self.high_level_encoder = TransformerBackbone(config)
 
         elif self.config.backbone == "legacy":
             # Legacy FSHMEncoder backbone
@@ -118,7 +132,9 @@ class DnaModel(nn.Module):
                 "Unsupported backbone '%s'; refusing to fall back to legacy/Transformer.",
                 self.config.backbone,
             )
-            raise ValueError(f"Unsupported backbone {self.config.backbone!r}; expected 'dual_helix' or 'legacy'.")
+            raise ValueError(
+                f"Unsupported backbone {self.config.backbone!r}; expected a configured supported backbone."
+            )
 
         self.apply(self._init_weights)
         LOGGER.info("[Model] Weights initialized with Xavier/Kaiming")
@@ -217,7 +233,9 @@ class DnaModel(nn.Module):
         # Build attention mask for encoder
         mask_down = None
         if attention_mask is not None:
-            stride = 1 if self.config.backbone == "dual_helix" else self.config.low_level_stride
+            stride = (
+                1 if self.config.backbone in {"dual_helix", "bimamba", "transformer"} else self.config.low_level_stride
+            )
             if stride > 1:
                 target_len = x_down.size(1)
                 mask_down = attention_mask[:, : target_len * stride : stride]
@@ -277,7 +295,7 @@ class DnaModel(nn.Module):
         if aux_loss is not None:
             if self.config.backbone == "legacy":
                 fshm_router_aux_loss = aux_loss
-            else:
+            elif self.config.backbone in {"dual_helix", "transformer"}:
                 moe_aux_loss = aux_loss
 
         # 5. Upsample
@@ -286,7 +304,7 @@ class DnaModel(nn.Module):
             x_up = x_up[:, :L, :]
 
         # 6. U-Net skip (legacy backbone only)
-        if self.config.backbone != "dual_helix":
+        if self.config.backbone == "legacy":
             x_fused = torch.cat([x_up, x_skip], dim=-1)
             x_up = self.unet_fusion(x_fused)
 

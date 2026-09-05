@@ -4,6 +4,7 @@ import logging
 import os
 import random
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -23,6 +24,59 @@ def _seed_worker(_worker_id):
 
 LOADER_GENERATOR = torch.Generator()
 LOADER_GENERATOR.manual_seed(42)
+
+
+def load_split_manifest(split_manifest: str | os.PathLike[str], files: Sequence[str]) -> dict[str, dict[str, set[int]]]:
+    """Load explicit record-level train/eval assignments from a JSONL manifest.
+
+    Paths in the manifest are interpreted relative to the manifest location.
+    Every input FASTA must have complete assignments for its qualifying
+    records; this avoids silently falling back to a different split policy.
+    """
+
+    manifest_path = Path(split_manifest).expanduser().resolve()
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Split manifest not found: {manifest_path}")
+
+    requested_files = {os.path.realpath(path) for path in files}
+    assignments: dict[str, dict[str, set[int]]] = {}
+    seen: set[tuple[str, int]] = set()
+
+    with manifest_path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                row = json.loads(line)
+                raw_path = row["fasta"]
+                record_index = int(row["record_index"])
+                split = str(row["split"]).lower()
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Invalid split-manifest row {line_number}: {exc}") from exc
+
+            resolved_path = Path(raw_path).expanduser()
+            if not resolved_path.is_absolute():
+                resolved_path = manifest_path.parent / resolved_path
+            file_key = os.path.realpath(resolved_path)
+            if file_key not in requested_files:
+                continue
+            if record_index < 0 or split not in {"train", "eval"}:
+                raise ValueError(
+                    f"Invalid split-manifest row {line_number}: record_index must be non-negative "
+                    "and split must be 'train' or 'eval'."
+                )
+            key = (file_key, record_index)
+            if key in seen:
+                raise ValueError(f"Duplicate split-manifest assignment for {raw_path} record {record_index}")
+            seen.add(key)
+            assignments.setdefault(file_key, {"train": set(), "eval": set()})[split].add(record_index)
+
+    missing_files = requested_files.difference(assignments)
+    if missing_files:
+        formatted = ", ".join(sorted(missing_files))
+        raise ValueError(f"Split manifest has no assignments for requested FASTA files: {formatted}")
+    return assignments
 
 
 class RoundRobinLoader:
@@ -378,6 +432,17 @@ class NpyDataset(Dataset):
         return item
 
 
+def _requires_raw_sequences(
+    *,
+    provide_rc: bool,
+    use_reverse_prob: float,
+    frameshift_prob: float,
+    return_offsets: bool,
+) -> bool:
+    """Return whether requested training features need raw FASTA sequences."""
+    return provide_rc or use_reverse_prob > 0.0 or frameshift_prob > 0.0 or return_offsets
+
+
 def build_loaders_balanced(
     files: Sequence[str],
     tokenizer: DnaTokenizer,
@@ -396,6 +461,9 @@ def build_loaders_balanced(
     pin_memory: bool = True,
     prefetch_factor: int = 2,
     use_smart_batching: bool = False,
+    split_manifest: str | os.PathLike[str] | None = None,
+    seed: int = 42,
+    return_offsets: bool = False,
 ):
     """Build record-disjoint training and evaluation loaders."""
     from .dataset import DatasetImpl, collate
@@ -406,7 +474,11 @@ def build_loaders_balanced(
     names = []
     train_loaders = []
     pooled_eval_seqs = []
+    eval_loaders = []
+    eval_names = []
     kept_total_windows = 0
+    split_assignments = load_split_manifest(split_manifest, files) if split_manifest else None
+    loader_generator = torch.Generator().manual_seed(int(seed))
 
     for path in files:
         if not os.path.exists(path):
@@ -428,56 +500,66 @@ def build_loaders_balanced(
             LOGGER.warning("[DataPrep] No sequences >= %sbp in %s", min_chunk_length, path)
             continue
 
-        # Split per file by exact chunk count
-        # seq_windows = [((original_index, length), count) ...]
-        seq_windows = [
-            ((index, length), count_chunks_exact(length, max_length, stride, min_chunk_length))
-            for index, length in valid_items
-        ]
-        seq_windows = [(item, w) for item, w in seq_windows if w > 0]
+        if split_assignments is not None:
+            assignment = split_assignments[os.path.realpath(path)]
+            valid_indices = {index for index, _ in valid_items}
+            assigned_indices = assignment["train"] | assignment["eval"]
+            unassigned = valid_indices.difference(assigned_indices)
+            unknown = assigned_indices.difference({index for index, _, _, _ in seq_offsets})
+            if unknown:
+                raise ValueError(f"Split manifest references missing records in {path}: {sorted(unknown)[:5]}")
+            if unassigned:
+                raise ValueError(
+                    f"Split manifest leaves {len(unassigned)} qualifying records unassigned in {path}. "
+                    "Regenerate it rather than falling back to ratio splitting."
+                )
+            train_items = [item for item in valid_items if item[0] in assignment["train"]]
+            eval_items = [item for item in valid_items if item[0] in assignment["eval"]]
+            if not train_items or not eval_items:
+                raise ValueError(f"Split manifest must assign qualifying records to both train and eval for {path}")
+        else:
+            # Split per file by exact chunk count. This remains a convenience
+            # fallback; scientific runs should use --split-manifest.
+            seq_windows = [
+                ((index, length), count_chunks_exact(length, max_length, stride, min_chunk_length))
+                for index, length in valid_items
+            ]
+            seq_windows = [(item, w) for item, w in seq_windows if w > 0]
 
-        if not seq_windows:
-            LOGGER.warning("[DataPrep] No valid chunks >= %sbp in %s", min_chunk_length, path)
-            continue
+            if not seq_windows:
+                LOGGER.warning("[DataPrep] No valid chunks >= %sbp in %s", min_chunk_length, path)
+                continue
 
-        total_windows = sum(w for _, w in seq_windows)
+            total_windows = sum(w for _, w in seq_windows)
+            target_train_windows = int(total_windows * train_split_ratio)
+            train_items = []
+            eval_items = []
+            cumulative = 0
 
-        # Split by cumulative window count with better boundary handling
-        target_train_windows = int(total_windows * train_split_ratio)
-        train_items = []  # List of (original_index, length)
-        eval_items = []  # List of (original_index, length)
-        cumulative = 0
-
-        for item, wc in seq_windows:
-            if cumulative + wc <= target_train_windows:
-                # Entire sequence fits in training
-                train_items.append(item)
-                cumulative += wc
-            elif cumulative < target_train_windows:
-                # Sequence straddles boundary - assign to whichever is closer
-                remaining_train = target_train_windows - cumulative
-                if remaining_train > wc / 2:
-                    # More than half needed for train
+            for item, wc in seq_windows:
+                if cumulative + wc <= target_train_windows:
                     train_items.append(item)
                     cumulative += wc
+                elif cumulative < target_train_windows:
+                    remaining_train = target_train_windows - cumulative
+                    if remaining_train > wc / 2:
+                        train_items.append(item)
+                        cumulative += wc
+                    else:
+                        eval_items.append(item)
                 else:
-                    # Send to eval
                     eval_items.append(item)
-            else:
-                # Already met training quota
-                eval_items.append(item)
 
-        # Preserve record-level separation between training and evaluation.
-        if not train_items and valid_items:
-            train_items = [valid_items[0]]
-            eval_items = valid_items[1:] if len(valid_items) > 1 else []
-        if not eval_items and len(train_items) > 1:
-            eval_item = min(
-                train_items,
-                key=lambda item: count_chunks_exact(item[1], max_length, stride, min_chunk_length),
-            )
-            train_items.remove(eval_item)
-            eval_items.append(eval_item)
+            if not train_items and valid_items:
+                train_items = [valid_items[0]]
+                eval_items = valid_items[1:]
+            if not eval_items and len(train_items) > 1:
+                eval_item = min(
+                    train_items,
+                    key=lambda item: count_chunks_exact(item[1], max_length, stride, min_chunk_length),
+                )
+                train_items.remove(eval_item)
+                eval_items.append(eval_item)
 
         # Handle cap_by_file with warnings
         basename = os.path.basename(path)
@@ -548,7 +630,12 @@ def build_loaders_balanced(
         npy_path = pretokenized_paths(path, getattr(tokenizer, "tokenizer_type", "bpe"))["input_ids"]
 
         ds_train = None
-        raw_sequence_required = provide_rc or use_reverse_prob > 0.0 or frameshift_prob > 0.0
+        raw_sequence_required = _requires_raw_sequences(
+            provide_rc=provide_rc,
+            use_reverse_prob=use_reverse_prob,
+            frameshift_prob=frameshift_prob,
+            return_offsets=return_offsets,
+        )
         if os.path.exists(npy_path) and not raw_sequence_required:
             LOGGER.info("[DataPrep] %s: Found pre-tokenized arrays. Using NpyDataset.", basename)
             try:
@@ -572,6 +659,8 @@ def build_loaders_balanced(
                 reasons.append("reverse-complement augmentation")
             if frameshift_prob > 0.0:
                 reasons.append("pre-BPE frameshift augmentation")
+            if return_offsets:
+                reasons.append("token-to-base offsets")
             reason_text = ", ".join(reasons)
             LOGGER.info("[DataPrep] %s: .npy found, but %s requested; using FASTA loader.", basename, reason_text)
 
@@ -611,6 +700,7 @@ def build_loaders_balanced(
                 indices=train_indices,
                 lazy_load=should_lazy,
                 precomputed_offsets=seq_offsets,
+                return_offsets=return_offsets,
             )
 
         if len(ds_train) == 0:
@@ -640,12 +730,43 @@ def build_loaders_balanced(
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
             persistent_workers=num_workers > 0,
             worker_init_fn=_seed_worker,
-            generator=LOADER_GENERATOR,
+            generator=loader_generator,
         )
         train_loaders.append(dl_train)
         names.append(basename)
 
-        if eval_items:
+        if eval_items and split_assignments is not None:
+            eval_indices = [index for index, _ in eval_items]
+            eval_dataset = DatasetImpl(
+                tokenizer,
+                path,
+                max_length,
+                stride,
+                use_reverse_prob=0.0,
+                frameshift_prob=0.0,
+                min_chunk_length=min_chunk_length,
+                indices=eval_indices,
+                lazy_load=True,
+                precomputed_offsets=seq_offsets,
+                return_offsets=return_offsets,
+            )
+            if len(eval_dataset) == 0:
+                raise ValueError(f"No qualifying held-out windows were found in {path}")
+            eval_loaders.append(
+                DataLoader(
+                    eval_dataset,
+                    shuffle=False,
+                    drop_last=False,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    collate_fn=collate,
+                    prefetch_factor=prefetch_factor if num_workers > 0 else None,
+                    persistent_workers=num_workers > 0,
+                )
+            )
+            eval_names.append(basename)
+        elif eval_items:
             eval_indices_set = {index for index, _ in eval_items}
             LOGGER.info("[DataPrep] Loading %s eval sequences via random access...", len(eval_indices_set))
 
@@ -660,63 +781,73 @@ def build_loaders_balanced(
                     else:
                         LOGGER.error("[DataPrep] Index %s out of bounds for %s", idx, path)
 
-    if not pooled_eval_seqs:
-        raise ValueError(
-            "No record-disjoint evaluation data is available. "
-            "Provide at least one FASTA file with two qualifying records."
+    if split_assignments is None:
+        if not pooled_eval_seqs:
+            raise ValueError(
+                "No record-disjoint evaluation data is available. "
+                "Provide at least one FASTA file with two qualifying records."
+            )
+        # Trim ratio-split evaluation data only. Explicit manifests define the
+        # intended held-out set and must never be silently truncated.
+        r = float(train_split_ratio)
+        desired_eval_windows = max(1, int(round(kept_total_windows * (1.0 - r) / r)))
+        eval_accum = 0
+        trimmed_eval = []
+        random.Random(int(seed)).shuffle(pooled_eval_seqs)
+
+        for sequence in pooled_eval_seqs:
+            windows = count_chunks_exact(len(sequence), max_length, stride, min_chunk_length)
+            if windows <= 0:
+                continue
+            if eval_accum >= desired_eval_windows:
+                break
+            trimmed_eval.append(sequence)
+            eval_accum += windows
+
+        pooled_eval_seqs = trimmed_eval
+        LOGGER.info(
+            "[DataPrep] Adjusted eval windows to %s (target: %s) to match %.1f%% train split ratio "
+            "(kept train windows: %s)",
+            eval_accum,
+            desired_eval_windows,
+            r * 100.0,
+            kept_total_windows,
         )
 
-    # Trim eval set to match desired ratio
-    r = float(train_split_ratio)
-    desired_eval_windows = max(1, int(round(kept_total_windows * (1.0 - r) / r)))
+        # Build the convenience ratio-split evaluation loader.
+        ds_eval = DatasetImpl(
+            tokenizer,
+            pooled_eval_seqs,
+            max_length,
+            stride,
+            use_reverse_prob=0.0,
+            frameshift_prob=0.0,
+            min_chunk_length=min_chunk_length,
+            return_offsets=return_offsets,
+        )
 
-    eval_accum = 0
-    trimmed_eval = []
-
-    random.Random(42).shuffle(pooled_eval_seqs)
-
-    for s in pooled_eval_seqs:
-        w = count_chunks_exact(len(s), max_length, stride, min_chunk_length)
-        if w <= 0:
-            continue
-        if eval_accum >= desired_eval_windows:
-            break
-        trimmed_eval.append(s)
-        eval_accum += w
-
-    pooled_eval_seqs = trimmed_eval
-
-    LOGGER.info(
-        "[DataPrep] Adjusted eval windows to %s (target: %s) to match %.1f%% train split ratio "
-        "(kept train windows: %s)",
-        eval_accum,
-        desired_eval_windows,
-        r * 100.0,
-        kept_total_windows,
-    )
-
-    # Build evaluation loader
-    ds_eval = DatasetImpl(
-        tokenizer,
-        pooled_eval_seqs,
-        max_length,
-        stride,
-        use_reverse_prob=0.0,
-        frameshift_prob=0.0,
-        min_chunk_length=min_chunk_length,
-    )
-
-    eval_loader = DataLoader(
-        ds_eval,
-        shuffle=False,
-        drop_last=False,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        collate_fn=collate,
-        prefetch_factor=prefetch_factor if num_workers > 0 else None,
-        persistent_workers=num_workers > 0,
-    )
+        eval_loader = DataLoader(
+            ds_eval,
+            shuffle=False,
+            drop_last=False,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            collate_fn=collate,
+            prefetch_factor=prefetch_factor if num_workers > 0 else None,
+            persistent_workers=num_workers > 0,
+        )
+        kept_eval = len(ds_eval)
+    else:
+        if not eval_loaders:
+            raise ValueError(
+                "No record-disjoint evaluation data is available. "
+                "Provide at least one FASTA file with two qualifying records."
+            )
+        # Cycle through each source FASTA. This prevents a capped evaluation
+        # from being dominated by the first alphabetically ordered domain.
+        eval_loader = RoundRobinLoader(eval_loaders, names=eval_names)
+        kept_eval = sum(len(loader.dataset) for loader in eval_loaders)
 
     LOGGER.info(
         "[DataPrep] FINAL: windows~%s, files=%s, cap=%s, train_chunks=%s, eval_chunks=%s",
@@ -724,7 +855,7 @@ def build_loaders_balanced(
         len(names),
         max_chunks_per_file,
         sum(len(dl.dataset) for dl in train_loaders),
-        len(ds_eval),
+        kept_eval,
     )
 
     # Create round-robin loader
@@ -735,7 +866,6 @@ def build_loaders_balanced(
 
     # Final verification
     kept_train = sum(len(dl.dataset) for dl in train_loaders)
-    kept_eval = len(ds_eval)
     tot = kept_train + kept_eval if (kept_train + kept_eval) > 0 else 1
 
     LOGGER.info(

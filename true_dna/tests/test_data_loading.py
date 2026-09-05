@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 import torch
 from dna_model.dataset import DatasetImpl
-from dna_model.loaders import NpyDataset, RoundRobinLoader, SmartBatchSampler, build_loaders_balanced
+from dna_model.loaders import (
+    NpyDataset,
+    RoundRobinLoader,
+    SmartBatchSampler,
+    _requires_raw_sequences,
+    build_loaders_balanced,
+)
 from dna_model.tokenizer import BaseTokenizer, pretokenized_paths, tokenizer_metadata
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -129,6 +135,15 @@ def test_npy_dataset_rejects_base_cache_without_metadata(tmp_path):
             min_chunk_length=1,
             tokenizer=BaseTokenizer(),
         )
+
+
+def test_offsets_force_the_raw_sequence_loader_even_when_a_token_cache_exists():
+    assert _requires_raw_sequences(
+        provide_rc=False,
+        use_reverse_prob=0.0,
+        frameshift_prob=0.0,
+        return_offsets=True,
+    )
 
 
 def test_balanced_loader_keeps_train_and_eval_records_disjoint(tmp_path):

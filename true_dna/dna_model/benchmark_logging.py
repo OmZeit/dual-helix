@@ -80,9 +80,26 @@ def build_eval_history_record(
         "eval_max_batches": _json_safe_scalar(eval_metrics.get("max_batches")),
         "timestamp": float(time.time() if timestamp is None else timestamp),
     }
-    for key in ("tokenizer_type", "metric_granularity"):
+    for key in ("tokenizer_type", "metric_granularity", "mask_coordinate_system", "mask_replacement"):
         if eval_metrics.get(key) is not None:
             record[key] = eval_metrics[key]
+    for key in (
+        "base_loss",
+        "base_normalized_loss",
+        "bits_per_base",
+        "base_perplexity",
+        "masked_base_fraction",
+        "mean_valid_target_probability_mass",
+        "conditional_valid_token_loss",
+        "conditional_valid_bits_per_base",
+        "conditional_acgt_accuracy",
+        "conditional_acgt_correct",
+        "conditional_acgt_targets",
+        "special_token_argmax_rate",
+        "special_token_argmax_count",
+    ):
+        if eval_metrics.get(key) is not None:
+            record[key] = _json_safe_scalar(eval_metrics.get(key))
     return record
 
 
@@ -119,6 +136,15 @@ def build_eval_log_payload(record: Mapping[str, Any], eval_metrics: Mapping[str,
         "token_ece",
         "masked_bases",
         "masked_tokens",
+        "masked_base_fraction",
+        "mean_valid_target_probability_mass",
+        "conditional_valid_token_loss",
+        "conditional_valid_bits_per_base",
+        "conditional_acgt_accuracy",
+        "conditional_acgt_correct",
+        "conditional_acgt_targets",
+        "special_token_argmax_rate",
+        "special_token_argmax_count",
         "accuracy_A",
         "accuracy_C",
         "accuracy_G",
@@ -130,6 +156,9 @@ def build_eval_log_payload(record: Mapping[str, Any], eval_metrics: Mapping[str,
     ):
         if key in eval_metrics:
             payload[f"eval/{key}"] = _json_safe_scalar(eval_metrics.get(key))
+    baselines = eval_metrics.get("baselines")
+    if isinstance(baselines, Mapping):
+        payload.update(flatten_numeric_metrics(baselines, prefix="eval/baselines"))
     return {k: v for k, v in payload.items() if _json_safe_scalar(v) is not None}
 
 

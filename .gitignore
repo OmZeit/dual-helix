@@ -79,6 +79,7 @@ wandb_backup/
 *.fna.gz
 *.fastq.gz
 *.fq.gz
+!/true_dna/tests/fixtures/smoke_protocol_v2.fa
 *.log
 
 # Notebook and editor state
@@ -87,9 +88,12 @@ wandb_backup/
 .vscode/
 *.swp
 *.swo
+PLAN.md
 
 # Vendored / local tool installs
 .audit_tools/
+/.agents/
+/superpowers/
 *.conda
 *.exe
 *.dll

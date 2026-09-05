@@ -54,6 +54,7 @@ __pycache__
 *.fna.gz
 *.fastq.gz
 *.fq.gz
+!true_dna/tests/fixtures/smoke_protocol_v2.fa
 data
 experiments
 true_dna/data

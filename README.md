@@ -27,6 +27,21 @@ evaluation, and benchmark entrypoints deliberately reject CPU execution.
 - `true_dna/tests/` contains the automated test suite.
 - `true_dna/docs/architecture.md` describes the model and training objective.
 
+## Repository workflow diagram
+
+```mermaid
+flowchart TD
+  A[Public genomes] --> B[scripts/collect_and_select_taxids.py]
+  B --> C[scripts/download_dataset.py]
+  C --> D[Clean + split FASTA corpus]
+  D --> E[scripts/train.py]
+  E --> F[Model checkpoints + metrics]
+  F --> G[scripts/evaluate.py]
+  F --> H[scripts/run_controlled_ablation.py]
+  G --> I[Benchmark reports]
+  H --> I
+```
+
 ## Installation
 
 Python 3.10 through 3.12 is recommended. Create an isolated environment from
